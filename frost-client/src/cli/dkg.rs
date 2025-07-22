@@ -9,6 +9,8 @@ use eyre::{eyre, Context as _, OptionExt};
 use frost_core::Ciphersuite;
 use frost_ed25519::Ed25519Sha512;
 use frost_secp256k1_tr::Secp256K1Sha256TR;
+use bitcoin::key::XOnlyPublicKey;
+use crate::util::taproot::tweak_internal_key;
 use reqwest::Url;
 use zeroize::Zeroizing;
 
@@ -46,6 +48,7 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
         ciphersuite: _,
         threshold,
         participants,
+        taproot_tweak,
     } = (*args).clone()
     else {
         panic!("invalid Command");
@@ -107,9 +110,27 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
     };
 
     // Generate key shares
-    let (key_package, public_key_package, pubkey_map) =
+    let (key_package, mut public_key_package, pubkey_map) =
         cli::cli_for_processed_args::<C>(dkg_config, &mut input, &mut output).await?;
     let key_package = Zeroizing::new(key_package);
+
+    // ---------------------------------------------------------------------
+    // Taproot tweak: replace `verifying_key` with Q and store P
+    let mut internal_key_bytes = None;                                 // NEW
+    if taproot_tweak && C::ID == Secp256K1Sha256TR::ID {               // NEW
+        let p_bytes = public_key_package.verifying_key().serialize()?; // P
+        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).unwrap();
+        let (q_key, _t) = tweak_internal_key(p_xonly);
+
+        use frost_core::keys::PublicKeyPackage;                        // ctor
+        use frost_core::VerifyingKey;
+        let q_vk = VerifyingKey::<C>::deserialize(&q_key.serialize())?;
+        public_key_package = PublicKeyPackage::new(                   // Q
+            public_key_package.verifying_shares().clone(),
+            q_vk,
+        );
+        internal_key_bytes = Some(p_xonly.serialize().to_vec());       // P
+    }
 
     // Reverse pubkey_map
     let pubkey_map = pubkey_map
@@ -133,6 +154,7 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
         description: description.clone(),
         key_package: postcard::to_allocvec(&key_package)?,
         public_key_package: postcard::to_allocvec(&public_key_package)?,
+        internal_key: internal_key_bytes.clone(),
         participant: participants.clone(),
         server_url: Some(server_url.clone()),
     };

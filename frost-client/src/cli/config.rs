@@ -91,6 +91,8 @@ pub struct Group {
     /// The group participants, keyed by hex-encoded identifier
     #[zeroize(skip)]
     pub participant: BTreeMap<String, Participant>,
+    #[serde(default)]               // keep backward compatibility
+    pub internal_key: Option<Vec<u8>>,   // NEW: 32‑byte x‑only P
 }
 
 impl ZeroizeOnDrop for Group {}

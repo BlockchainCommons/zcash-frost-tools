@@ -104,6 +104,10 @@ pub enum Command {
         /// The total number of participants (maximum number of signers).
         #[arg(short = 'n', long, default_value_t = 3)]
         num_signers: u16,
+        /// Write the tweaked Taproot key (and store the untweaked one) so a
+        /// quorum can later produce key‑path signatures.
+        #[arg(long, default_value_t = false)]
+        taproot_tweak: bool,
     },
     /// Generate FROST shares using Distributed Key Generation.
     Dkg {
@@ -128,6 +132,8 @@ pub enum Command {
         /// who creates the DKG session.
         #[arg(short = 'S', long, value_delimiter = ',')]
         participants: Vec<String>,
+        #[arg(long, default_value_t = false)]
+        taproot_tweak: bool,
     },
     /// Lists the groups the user is in.
     Groups {
@@ -201,6 +207,10 @@ pub enum Command {
         /// human-readable hex-string is printed to stdout.
         #[arg(short = 'o', long, default_value = "")]
         signature: String,
+        /// After the FROST round finishes, patch the signature so it verifies
+        /// under the tweaked Taproot key.
+        #[arg(long, default_value_t = false)]
+        taproot_tweak: bool,
     },
     /// Participate in a FROST signing session.
     Participant {
@@ -221,5 +231,7 @@ pub enum Command {
         /// case there is a single active session.
         #[arg(short = 'S', long)]
         session: Option<String>,
+        #[arg(long, default_value_t = false)]
+        taproot_tweak: bool,          // (flag accepted, not used yet)
     },
 }

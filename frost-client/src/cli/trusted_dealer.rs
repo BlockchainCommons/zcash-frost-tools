@@ -6,6 +6,10 @@ use rand::thread_rng;
 
 use frost_core::{keys::KeyPackage, Ciphersuite};
 use frost_ed25519::Ed25519Sha512;
+use frost_secp256k1_tr::Secp256K1Sha256TR;
+use bitcoin::key::XOnlyPublicKey;
+
+use crate::util::taproot::tweak_internal_key;
 
 use super::{
     args::Command,
@@ -25,6 +29,8 @@ pub fn trusted_dealer(args: &Command) -> Result<(), Box<dyn Error>> {
         trusted_dealer_for_ciphersuite::<Ed25519Sha512>(args)
     } else if ciphersuite == "redpallas" {
         trusted_dealer_for_ciphersuite::<reddsa::frost::redpallas::PallasBlake2b512>(args)
+    } else if ciphersuite == "secp256k1-tr" {
+        trusted_dealer_for_ciphersuite::<Secp256K1Sha256TR>(args)
     } else {
         Err(eyre!("unsupported ciphersuite").into())
     }
@@ -41,6 +47,7 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
         num_signers,
         names,
         server_url,
+        taproot_tweak,
     } = (*args).clone()
     else {
         panic!("invalid Command");
@@ -63,8 +70,28 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
     let mut rng = thread_rng();
 
     // Generate key shares
-    let (shares, public_key_package) =
+    let (shares, mut public_key_package) =
         trusted_dealer::trusted_dealer::<C, _>(&trusted_dealer_config, &mut rng)?;
+
+    // Optionally apply Taproot tweak (only makes sense for secp256k1‑TR) ----
+    let internal_key_bytes = None;
+    if taproot_tweak && C::ID == Secp256K1Sha256TR::ID {
+        // (1) untweaked P
+        let p_bytes = public_key_package.verifying_key().serialize()?;
+        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).expect("x-only key");
+        // (2) tweak -> Q
+        let (q_key, _t) = tweak_internal_key(p_xonly);
+        // (3) build a fresh PublicKeyPackage with the tweaked key Q
+        use frost_core::{keys::PublicKeyPackage, VerifyingKey};
+
+        let q_vk = VerifyingKey::<C>::deserialize(&q_key.serialize())
+            .map_err(|_| eyre!("cannot deserialize tweaked key"))?;
+
+        public_key_package = PublicKeyPackage::new(
+            public_key_package.verifying_shares().clone(), // getter from derive_getters
+            q_vk,
+        );
+    }
 
     // First pass over configs; create participants map
     let mut participants = BTreeMap::new();
@@ -104,6 +131,7 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
             description: description.clone(),
             key_package: postcard::to_allocvec(&key_package)?,
             public_key_package: postcard::to_allocvec(&public_key_package)?,
+            internal_key: internal_key_bytes.clone(),
             participant: participants.clone(),
             server_url: server_url.clone(),
         };

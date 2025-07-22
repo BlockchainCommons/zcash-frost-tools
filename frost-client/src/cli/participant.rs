@@ -46,6 +46,7 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
         server_url,
         group,
         session,
+        ..
     } = (*args).clone()
     else {
         panic!("invalid Command");

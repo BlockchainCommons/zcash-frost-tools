@@ -15,6 +15,7 @@ axum-server = "0.7"
 axum-test = "17.2.0"
 base64 = "0.22.1"
 bech32 = "0.11.0"
+bitcoin = "0.32.6"
 clap = "4.5.23"
 delay_map = "0.4.1"
 dirs = "5.0.1"
@@ -32,6 +33,7 @@ halo2_gadgets = "0.3.0"
 halo2_proofs = "0.3.0"
 hex = "0.4.3"
 itertools = "0.14.0"
+k256 = "0.13.4"
 lazy_static = "1.5.0"
 message-io = "0.18"
 orchard = "0.10.1"
@@ -69,6 +71,7 @@ zcash_primitives = "0.21.0"
 zcash_proofs = "0.21.0"
 zcash_protocol = "0.4.3"
 zeroize = "1.8.1"
+
 
 [patch.crates-io]
 # TODO: remove this when https://github.com/zcash/orchard/issues/430 is fully
