@@ -3990,8 +3990,10 @@ dependencies = [
 name = "tests"
 version = "0.1.0"
 dependencies = [
+ "bitcoin",
  "exitcode",
  "frost-client",
+ "frost-core",
  "frost-ed25519",
  "frost-secp256k1-tr",
  "frostd",
