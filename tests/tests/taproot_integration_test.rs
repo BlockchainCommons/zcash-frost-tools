@@ -307,12 +307,11 @@ fn test_complete_frost_taproot_library_signing() {
 
     println!("   ✅ Original signature: {}", hex::encode(&signature_bytes));
 
-    // Step 9: Verify the signature against the tweaked public key
-    println!("✅ Step 9: Verifying signature...");
+    // Step 9: Verify the signature cryptographically
+    println!("✅ Step 9: Performing cryptographic signature verification...");
 
-    // For proper Taproot verification, we would need to apply the signature tweak (s' = s + e·t)
-    // But for this test, let's verify that the signature format is correct
-    assert_eq!(signature_bytes.len(), 64, "Final signature should be 64 bytes");
+    // Verify signature format first
+    assert_eq!(signature_bytes.len(), 64, "Signature should be 64 bytes (Schnorr format)");
 
     // Verify signature components are not zero
     let r_bytes = &signature_bytes[..32];
@@ -320,15 +319,31 @@ fn test_complete_frost_taproot_library_signing() {
     assert!(!r_bytes.iter().all(|&b| b == 0), "r component should not be zero");
     assert!(!s_bytes.iter().all(|&b| b == 0), "s component should not be zero");
 
-    // Try to verify with the original public key (should work since we used original for aggregation)
+    // Perform cryptographic verification using the original public key
+    // (The signature was created with the original key, so it should verify against it)
     let verification_result = public_key_package
         .verifying_key()
         .verify(message, &group_signature);
 
     match verification_result {
-        Ok(()) => println!("   ✅ Signature verification with original key: PASSED"),
-        Err(e) => println!("   ⚠️ Signature verification with original key failed: {:?}", e),
+        Ok(()) => {
+            println!("   ✅ Signature verification: PASSED");
+            println!("   🎯 Message was signed with FROST threshold signature");
+        },
+        Err(e) => {
+            panic!("Signature verification failed: {:?}", e);
+        }
     }
+
+    // Step 9b: Demonstrate Taproot tweak difference
+    println!("🔧 Step 9b: Validating Taproot tweak was applied...");
+
+    // The tweaked public key should be different from the original
+    assert_ne!(original_bytes, q_bytes, "Taproot tweak should change the public key");
+
+    println!("   ✅ Original public key: {}", hex::encode(&original_bytes));
+    println!("   ✅ Taproot-tweaked key: {}", hex::encode(&q_bytes));
+    println!("   ✅ Taproot tweak validation: PASSED");
 
     // Step 10: Summary and validation
     println!("📊 Step 10: Test summary and validation...");
@@ -343,14 +358,15 @@ fn test_complete_frost_taproot_library_signing() {
 
     println!("   ✅ All validations passed");
     println!("");
-    println!("� Complete FROST Taproot library signing test PASSED!");
+    println!("🎉 Complete FROST Taproot library signing test PASSED!");
     println!("===============================================");
     println!("   • Key generation: ✅");
     println!("   • Taproot tweaking: ✅");
     println!("   • Round 1 (nonces): ✅");
     println!("   • Round 2 (signature shares): ✅");
     println!("   • Signature aggregation: ✅");
-    println!("   • Format validation: ✅");
+    println!("   • Cryptographic verification: ✅");
+    println!("   • Taproot validation: ✅");
     println!("   • Participants: {} of {}", min_signers, max_signers);
     println!("   • Message length: {} bytes", message.len());
     println!("   • Signature length: {} bytes", signature_bytes.len());
