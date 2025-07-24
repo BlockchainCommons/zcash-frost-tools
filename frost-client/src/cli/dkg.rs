@@ -48,7 +48,6 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
         ciphersuite: _,
         threshold,
         participants,
-        taproot_tweak,
     } = (*args).clone()
     else {
         panic!("invalid Command");
@@ -115,9 +114,9 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
     let key_package = Zeroizing::new(key_package);
 
     // ---------------------------------------------------------------------
-    // Taproot tweak: replace `verifying_key` with Q and store P
+    // Taproot tweak: replace `verifying_key` with Q and store P (automatic for secp256k1-tr)
     let mut internal_key_bytes = None;                                 // NEW
-    if taproot_tweak && C::ID == Secp256K1Sha256TR::ID {               // NEW
+    if C::ID == Secp256K1Sha256TR::ID {               // NEW
         let p_bytes = public_key_package.verifying_key().serialize()?; // P
         let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).unwrap();
         let (q_key, _t) = tweak_internal_key(p_xonly);

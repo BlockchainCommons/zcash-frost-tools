@@ -73,6 +73,11 @@ pub struct Args {
     /// Port to connect to, if using HTTP mode.
     #[arg(short, long, default_value_t = 443)]
     pub port: u16,
+
+    /// The internal key (hex-encoded) for Taproot tweaking. Required for
+    /// secp256k1-tr ciphersuite when using Taproot tweaked keys.
+    #[arg(long)]
+    pub internal_key: Option<String>,
 }
 
 #[derive(Clone)]
@@ -118,6 +123,9 @@ pub struct ProcessedArgs<C: Ciphersuite> {
 
     /// The coordinator's communication public key for HTTP mode.
     pub comm_pubkey: Option<PublicKey>,
+
+    /// The internal key bytes for Taproot tweaking (optional).
+    pub internal_key: Option<Vec<u8>>,
 }
 
 impl<C: Ciphersuite + 'static> ProcessedArgs<C> {
@@ -155,6 +163,13 @@ impl<C: Ciphersuite + 'static> ProcessedArgs<C> {
         println!("Processing randomizer {:?}", args.randomizer);
         let randomizers = read_randomizers(&args.randomizer, output, input)?;
 
+        // Parse internal_key if provided
+        let internal_key = if let Some(internal_key_hex) = &args.internal_key {
+            Some(hex::decode(internal_key_hex.trim())?)
+        } else {
+            None
+        };
+
         Ok(ProcessedArgs {
             cli: args.cli,
             http: false,
@@ -168,6 +183,7 @@ impl<C: Ciphersuite + 'static> ProcessedArgs<C> {
             port: args.port,
             comm_privkey: None,
             comm_pubkey: None,
+            internal_key,
         })
     }
 }

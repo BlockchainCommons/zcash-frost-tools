@@ -8,11 +8,11 @@ The FROST tools now support Taproot tweaking for the `secp256k1-tr` ciphersuite.
 
 ## Usage
 
-### Basic Key Generation with Taproot Tweak
+### Basic Key Generation
 
 ```bash
-# Generate FROST key material with Taproot tweak
-trusted-dealer -t 2 -n 3 -C secp256k1-tr --taproot-tweak
+# Generate FROST key material
+trusted-dealer -t 2 -n 3 -C secp256k1-tr
 
 # This creates:
 # - public-key-package.json (contains the tweaked group public key)

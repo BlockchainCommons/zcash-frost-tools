@@ -13,9 +13,8 @@ use rand::{CryptoRng, RngCore};
 use std::collections::BTreeMap;
 
 use frost_core::keys::{IdentifierList, PublicKeyPackage, SecretShare};
-use frost_core::{Ciphersuite, Identifier, VerifyingKey};
+use frost_core::{Ciphersuite, Identifier};
 use reddsa::frost::redpallas::keys::EvenY;
-use bitcoin::key::XOnlyPublicKey;
 
 use trusted_dealer_keygen::{split_secret, trusted_dealer_keygen};
 
@@ -80,34 +79,7 @@ pub fn trusted_dealer<C: Ciphersuite + 'static + MaybeIntoEvenY, R: RngCore + Cr
         split_secret(config, IdentifierList::<C>::Default, rng)?
     };
 
-    let (shares, mut public_key_package) = MaybeIntoEvenY::into_even_y(shares_and_package);
-
-    // Optionally apply Taproot tweak (only makes sense for secp256k1‑TR)
-    if config.taproot_tweak && C::ID == frost_secp256k1_tr::Secp256K1Sha256TR::ID {
-        use crate::util::taproot::tweak_internal_key;
-
-        // (1) untweaked P
-        let p_bytes = public_key_package.verifying_key().serialize()?;
-        // Extract x-coordinate from SEC1 compressed format (skip first byte)
-        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes[1..])
-            .map_err(|e| format!("cannot parse internal key: {:?}", e))?;
-
-        // (2) tweak -> Q
-        let (q_key, _t) = tweak_internal_key(p_xonly);
-
-        // (3) build a fresh PublicKeyPackage with the tweaked key Q
-        // Need to convert x-only (32 bytes) back to compressed SEC1 format (33 bytes)
-        let mut q_bytes = vec![0x02]; // compressed point prefix
-        q_bytes.extend_from_slice(&q_key.serialize());
-
-        let q_vk = VerifyingKey::<C>::deserialize(&q_bytes)
-            .map_err(|e| format!("cannot deserialize tweaked key: {:?}", e))?;
-
-        public_key_package = PublicKeyPackage::new(
-            public_key_package.verifying_shares().clone(), // getter from derive_getters
-            q_vk,
-        );
-    }
+    let (shares, public_key_package) = MaybeIntoEvenY::into_even_y(shares_and_package);
 
     Ok((shares, public_key_package))
 }

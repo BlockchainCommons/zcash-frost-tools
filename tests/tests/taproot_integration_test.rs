@@ -13,9 +13,9 @@ fn test_frost_taproot_tweak_integration() {
 
     println!("Running FROST Taproot integration test in: {:?}", test_path);
 
-    // Step 1: Generate FROST key material with Taproot tweak
+    // Step 1: Generate FROST key material (automatic Taproot for secp256k1-tr)
     let output = Command::new("trusted-dealer")
-        .args(&["-t", "2", "-n", "3", "-C", "secp256k1-tr", "--taproot-tweak"])
+        .args(&["-t", "2", "-n", "3", "-C", "secp256k1-tr"])
         .current_dir(test_path)
         .output()
         .expect("Failed to run trusted-dealer");
@@ -51,7 +51,7 @@ fn test_frost_taproot_tweak_integration() {
     fs::create_dir(&comparison_dir).expect("Failed to create comparison dir");
 
     let output = Command::new("trusted-dealer")
-        .args(&["-t", "2", "-n", "3", "-C", "secp256k1-tr"]) // No --taproot-tweak
+        .args(&["-t", "2", "-n", "3", "-C", "secp256k1-tr"])
         .current_dir(&comparison_dir)
         .output()
         .expect("Failed to run trusted-dealer for comparison");
@@ -92,7 +92,7 @@ fn test_taproot_tweak_consistency() {
         fs::create_dir(&run_dir).expect("Failed to create run dir");
 
         let output = Command::new("trusted-dealer")
-            .args(&["-t", "2", "-n", "3", "-C", "secp256k1-tr", "--taproot-tweak"])
+            .args(&["-t", "2", "-n", "3", "-C", "secp256k1-tr"])
             .current_dir(&run_dir)
             .output()
             .expect("Failed to run trusted-dealer");
@@ -121,33 +121,31 @@ fn test_taproot_tweak_consistency() {
 }
 
 #[test]
-fn test_taproot_tweak_field_validation() {
-    // Test that the taproot_tweak field is properly handled in Config
+fn test_config_structure_validation() {
+    // Test that the Config structure works properly without taproot_tweak field
     use frost_client::trusted_dealer::inputs::Config;
 
-    // Test Config with taproot_tweak = true
-    let config_with_tweak = Config {
+    // Test Config with secp256k1-tr (Taproot is automatic)
+    let config = Config {
         min_signers: 2,
         max_signers: 3,
         secret: vec![1u8; 32], // Valid 32-byte secret
-        taproot_tweak: true,
     };
 
-    // Test Config with taproot_tweak = false
-    let config_without_tweak = Config {
-        min_signers: 2,
-        max_signers: 3,
+    // Test another Config
+    let config2 = Config {
+        min_signers: 3,
+        max_signers: 5,
         secret: vec![2u8; 32], // Valid 32-byte secret
-        taproot_tweak: false,
     };
 
     // Verify configs can be created and fields accessed
-    assert_eq!(config_with_tweak.taproot_tweak, true);
-    assert_eq!(config_without_tweak.taproot_tweak, false);
-    assert_eq!(config_with_tweak.min_signers, 2);
-    assert_eq!(config_with_tweak.max_signers, 3);
+    assert_eq!(config.min_signers, 2);
+    assert_eq!(config.max_signers, 3);
+    assert_eq!(config2.min_signers, 3);
+    assert_eq!(config2.max_signers, 5);
 
-    println!("✅ Config taproot_tweak field validation passed");
+    println!("✅ Config structure validation passed");
 }
 
 #[test]

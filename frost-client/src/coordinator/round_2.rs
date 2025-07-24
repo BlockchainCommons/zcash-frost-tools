@@ -66,6 +66,8 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         )
         .unwrap()
     } else {
+        // For all other ciphersuites (including secp256k1-tr with pre-tweaked keys),
+        // use the standard aggregate function
         frost::aggregate::<C>(
             signing_package,
             &signatures_list,

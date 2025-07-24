@@ -62,7 +62,6 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
         message,
         randomizer,
         signature,
-        taproot_tweak,
     } = (*args).clone()
     else {
         panic!("invalid Command");
@@ -129,18 +128,19 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
                 .pubkey
                 .clone(),
         ),
+        internal_key: group.internal_key.clone(),
     };
 
     cli::cli_for_processed_args(pargs, &mut input, &mut output).await?;
 
     // ---------------------------------------------------------------------
-    // Patch s = s + e·t  after shares are combined
-    if taproot_tweak && C::ID == Secp256K1Sha256TR::ID && !signature.is_empty() {
+    // Patch s = s + e·t  after shares are combined (automatic for secp256k1-tr)
+    if C::ID == Secp256K1Sha256TR::ID && !signature.is_empty() {
     // fetch P or fail with a plain String so `?` coerces into `Box<dyn Error>`
     let p_bytes = group
         .internal_key
         .clone()
-        .ok_or::<Box<dyn std::error::Error>>("internal_key missing; run DKG with --taproot-tweak".into())?;
+        .ok_or::<Box<dyn std::error::Error>>("internal_key missing; run DKG with secp256k1-tr ciphersuite".into())?;
         let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).unwrap();
         let (q_key, tweak_scalar) = tweak_internal_key(p_xonly);
 

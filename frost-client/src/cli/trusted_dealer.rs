@@ -47,7 +47,6 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
         num_signers,
         names,
         server_url,
-        taproot_tweak,
     } = (*args).clone()
     else {
         panic!("invalid Command");
@@ -66,7 +65,6 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
         max_signers: num_signers,
         min_signers: threshold,
         secret: vec![],
-        taproot_tweak,
     };
     let mut rng = thread_rng();
 
@@ -74,11 +72,12 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
     let (shares, mut public_key_package) =
         trusted_dealer::trusted_dealer::<C, _>(&trusted_dealer_config, &mut rng)?;
 
-    // Optionally apply Taproot tweak (only makes sense for secp256k1‑TR) ----
-    let internal_key_bytes = None;
-    if taproot_tweak && C::ID == Secp256K1Sha256TR::ID {
+    // Always apply Taproot tweak for secp256k1-tr ciphersuite
+    let mut internal_key_bytes = None;
+    if C::ID == Secp256K1Sha256TR::ID {
         // (1) untweaked P
         let p_bytes = public_key_package.verifying_key().serialize()?;
+        internal_key_bytes = Some(p_bytes.clone());
         let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).expect("x-only key");
         // (2) tweak -> Q
         let (q_key, _t) = tweak_internal_key(p_xonly);

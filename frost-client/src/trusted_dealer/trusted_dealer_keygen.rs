@@ -64,7 +64,6 @@ mod tests {
             min_signers: 2,
             max_signers: 3,
             secret: b"helloIamaninvalidsecret111111111".to_vec(),
-            taproot_tweak: false,
         };
 
         let out = split_secret(&secret_config, IdentifierList::Default, &mut rng);
@@ -83,7 +82,6 @@ mod tests {
             min_signers: 2,
             max_signers: 3,
             secret,
-            taproot_tweak: false,
         };
 
         let out = split_secret(&secret_config, IdentifierList::Default, &mut rng);
