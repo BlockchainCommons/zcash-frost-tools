@@ -15,6 +15,7 @@ pub struct Config {
     pub min_signers: u16,
     pub max_signers: u16,
     pub secret: Vec<u8>,
+    pub taproot_tweak: bool,
 }
 
 fn validate_inputs<C: Ciphersuite>(config: &Config) -> Result<(), Error<C>> {
@@ -72,6 +73,7 @@ pub fn request_inputs<C: Ciphersuite + 'static>(
             min_signers,
             max_signers,
             secret,
+            taproot_tweak: args.taproot_tweak,
         }
     } else {
         let secret = hex::decode(args.key.clone().unwrap_or("".to_string()))
@@ -84,6 +86,7 @@ pub fn request_inputs<C: Ciphersuite + 'static>(
             min_signers: args.threshold,
             max_signers: args.num_signers,
             secret,
+            taproot_tweak: args.taproot_tweak,
         }
     };
 

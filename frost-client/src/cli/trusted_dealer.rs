@@ -66,6 +66,7 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
         max_signers: num_signers,
         min_signers: threshold,
         secret: vec![],
+        taproot_tweak,
     };
     let mut rng = thread_rng();
 

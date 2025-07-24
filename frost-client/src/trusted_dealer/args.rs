@@ -36,4 +36,9 @@ pub struct Args {
     /// specified, a random one will be generated.
     #[arg(long)]
     pub key: Option<String>,
+
+    /// Write the tweaked Taproot key (and store the untweaked one) so a
+    /// quorum can later produce key‑path signatures.
+    #[arg(long, default_value_t = false)]
+    pub taproot_tweak: bool,
 }

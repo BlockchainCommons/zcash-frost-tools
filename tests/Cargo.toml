@@ -16,9 +16,11 @@ tokio = { workspace = true, features = ["full"] }
 [dev-dependencies]
 frost-ed25519 = { workspace = true, features = ["serde"] }
 frost-secp256k1-tr = { workspace = true, features = ["serde"] }
+frost-client = { workspace = true }
 frostd = { workspace = true }
 rand = { workspace = true }
-frost-client = { workspace = true }
+tempfile = "3.8"
+serde_json = { workspace = true }
 
 [features]
 default = []
