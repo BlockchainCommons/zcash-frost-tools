@@ -1,148 +1,136 @@
-# FROST Taproot Tweak Integration Tests
+# FROST Taproot Integration Tests
 
-This document describes the integration tests for FROST signing with Taproot tweak functionality.
+This document describes the integration tests for FROST signing with Taproot functionality.
 
 ## Overview
 
-The FROST tools now support Taproot tweaking for the `secp256k1-tr` ciphersuite. When enabled, this applies BIP-341 Taproot tweaking to the generated group public key, making it suitable for use in Bitcoin Taproot transactions.
+The FROST tools support Taproot tweaking for the `secp256k1-tr` ciphersuite. This automatically applies BIP-341 Taproot tweaking to the generated group public key, making it suitable for use in Bitcoin Taproot transactions.
 
 ## Usage
 
 ### Basic Key Generation
 
 ```bash
-# Generate FROST key material
+# Generate FROST key material with automatic Taproot tweaking
 trusted-dealer -t 2 -n 3 -C secp256k1-tr
 
 # This creates:
-# - public-key-package.json (contains the tweaked group public key)
+# - public-key-package.json (contains the Taproot-tweaked group public key)
 # - key-package-1.json, key-package-2.json, key-package-3.json (individual participant keys)
 ```
 
-### Comparison with Non-Tweaked Keys
+### Complete Signing Ceremony
 
 ```bash
-# Generate non-tweaked keys for comparison
+# Generate keys
 trusted-dealer -t 2 -n 3 -C secp256k1-tr
 
-# The public keys will be different between tweaked and non-tweaked versions
+# Run signing ceremony (see test-frost-taproot.sh for complete workflow)
+coordinator -C secp256k1-tr --public-key-package public-key-package.json --message message.txt --num-signers 2 &
+participant -C secp256k1-tr -k key-package-1.json --ip 127.0.0.1 --port 12744 &
+participant -C secp256k1-tr -k key-package-2.json --ip 127.0.0.1 --port 12744 &
 ```
 
 ## Integration Tests
 
-### Bash Test Script
+### Shell Script Test
 
-A comprehensive bash script tests the complete workflow:
+A bash script tests the complete workflow:
 
 ```bash
-./test-frost-keygen.sh
+./test-frost-taproot.sh
 ```
 
-This script:
-- ✅ Generates FROST key material with Taproot tweak
-- ✅ Validates public key format (33-byte compressed)
-- ✅ Verifies key package structure consistency
-- ✅ Confirms ciphersuite is `FROST-secp256k1-SHA256-TR-v1`
-- ✅ Ensures Taproot tweak changes the public key
-- ✅ Compares tweaked vs non-tweaked keys
+This script performs a full FROST signing ceremony with:
+- ✅ Taproot key generation
+- ✅ Coordinator/participant orchestration
+- ✅ Signature generation
+- ✅ Cryptographic signature verification
+- ✅ Taproot validation
 
 ### Rust Integration Tests
 
 Run the Rust tests with:
 
 ```bash
-cargo test -p tests taproot --verbose
+cargo test --package tests --verbose
 ```
 
-This runs three test functions:
+This runs four main test functions:
 
 1. **`test_frost_taproot_tweak_integration`**
-   - Generates keys with and without Taproot tweak
-   - Verifies they produce different public keys
-   - Validates file structure and formats
+   - CLI-based key generation with secp256k1-tr
+   - Validates public key format and structure
+   - Confirms Taproot changes the public key
 
 2. **`test_taproot_tweak_consistency`**
-   - Ensures different runs produce different keys (randomness check)
-   - Validates that the tweak is being applied correctly
+   - Ensures different runs produce different keys (randomness)
+   - Validates deterministic behavior within single runs
 
-3. **`test_taproot_tweak_field_validation`**
-   - Tests the `Config` struct with `taproot_tweak` field
-   - Verifies the field can be set to `true` and `false`
+3. **`test_complete_frost_taproot_library_signing`**
+   - Full FROST ceremony using library calls directly
+   - Manual Taproot tweaking demonstration
+   - Complete cryptographic verification
 
-## Key Technical Details
+4. **`test_cli_frost_taproot_signing_ceremony`**
+   - Full FROST ceremony using CLI tools
+   - Network-based coordinator/participant communication
+   - End-to-end signature verification
 
-### Taproot Tweak Implementation
+## Technical Implementation
 
-The implementation follows BIP-341 Taproot specification:
+### Automatic Taproot Detection
 
-1. **Input**: FROST group public key P (33-byte compressed SEC1 format)
-2. **Extract x-coordinate**: Convert to 32-byte x-only format
-3. **Apply tweak**: `Q = P + H_TapTweak(P_x || merkle_root) * G` (merkle_root = empty)
-4. **Output**: Tweaked public key Q (converted back to 33-byte compressed format)
+Taproot tweaking is **automatic** when using the `secp256k1-tr` ciphersuite:
+- No flags or special configuration needed
+- The `trusted-dealer` automatically applies BIP-341 tweaking
+- All keys generated are Taproot-ready
+
+### BIP-341 Taproot Specification
+
+The implementation follows the BIP-341 standard:
+
+1. **Key Generation**: FROST generates a group public key P
+2. **Taproot Tweak**: Applies `Q = P + H_TapTweak(P_x) * G` (no script tree)
+3. **Output**: Tweaked public key Q suitable for Taproot key-path spending
 
 ### File Structure
 
-**Public Key Package** (`public-key-package.json`):
-```json
-{
-  "header": {
-    "version": 0,
-    "ciphersuite": "FROST-secp256k1-SHA256-TR-v1"
-  },
-  "verifying_shares": { /* participant verifying shares */ },
-  "verifying_key": "02..." // 33-byte compressed tweaked public key
-}
-```
+Generated files use the `FROST-secp256k1-SHA256-TR-v1` ciphersuite:
 
-**Key Package** (`key-package-N.json`):
 ```json
+// public-key-package.json
 {
-  "header": {
-    "version": 0,
-    "ciphersuite": "FROST-secp256k1-SHA256-TR-v1"
-  },
+  "header": { "ciphersuite": "FROST-secp256k1-SHA256-TR-v1" },
+  "verifying_key": "02...", // 33-byte compressed Taproot-tweaked key
+  "verifying_shares": { /* participant shares */ }
+}
+
+// key-package-N.json
+{
+  "header": { "ciphersuite": "FROST-secp256k1-SHA256-TR-v1" },
   "identifier": "000...001",
-  "signing_share": "...", // participant's secret share
-  "commitment": ["...", "..."] // commitment points
+  "signing_share": "...",
+  "commitment": ["...", "..."]
 }
 ```
 
-## Validation Checks
+## Test Validation
 
-The tests perform comprehensive validation:
+All tests perform full validation:
 
-- **Format validation**: Public keys are 66 hex characters (33 bytes)
-- **Compression validation**: Keys start with `02` or `03`
-- **Ciphersuite validation**: All components use `FROST-secp256k1-SHA256-TR-v1`
-- **Tweak validation**: Tweaked keys differ from untweaked keys
-- **Structure validation**: All required JSON fields are present
-- **Randomness validation**: Different runs produce different keys
-
-## Example Output
-
-```
-🎉 All tests passed!
-===============================================
-✅ FROST key generation with Taproot tweak
-✅ Public key format validation
-✅ Key package structure validation
-✅ Ciphersuite consistency validation
-✅ Taproot tweak functionality verification
-✅ Comparison with non-tweaked keys
-
-📊 Test Results:
-   • Threshold: 2 of 3 participants
-   • Ciphersuite: FROST-secp256k1-SHA256-TR-v1
-   • Tweaked public key: 029e696377f5577cca966050fc2eae9741e503aafed7692bd3ea1fee3075fb69fc
-   • Untweaked public key: 03efb85a07bfbf07e256ddfff541dc6bcac4e00d48aaaf2399470f451b8f64325e
-```
+- **Cryptographic verification**: All signatures are verified using `verifying_key.verify()`
+- **Format validation**: 66-character hex keys starting with `02`/`03`
+- **Ciphersuite validation**: All components use `secp256k1-tr`
+- **Taproot validation**: Different runs produce different keys
+- **End-to-end validation**: Complete signing ceremonies from key generation to verification
 
 ## Usage in Bitcoin Applications
 
-The tweaked public key can be used directly in Bitcoin Taproot outputs:
+The Taproot-tweaked public key can be used directly in Bitcoin:
 
-1. Extract the tweaked public key from `public-key-package.json`
-2. Convert to x-only format (remove first byte): `9e696377f5577cca966050fc2eae9741e503aafed7692bd3ea1fee3075fb69fc`
-3. Use in Taproot output scripts (OP_1 + 32 bytes)
+1. Extract the public key from `public-key-package.json`
+2. Convert to x-only format (remove first byte): `9e696377...fb69fc`
+3. Use in Taproot outputs: `OP_1 <32-byte-x-only-key>`
 
-The FROST signing process will need to account for the tweak when generating signatures for Taproot key-path spends.
+FROST signatures generated with these keys are valid for Taproot key-path spending.
