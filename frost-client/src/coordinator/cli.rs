@@ -1,9 +1,21 @@
 use std::collections::BTreeMap;
 use std::io::{BufRead, Write};
 
+use eyre::eyre;
+use eyre::Context;
+
+use crate::util::taproot::tweak_internal_key;
+use bitcoin::{
+    hashes::{sha256, Hash},
+    key::XOnlyPublicKey,
+    secp256k1::Scalar as SecScalar,
+};
 use frost::{round1::SigningCommitments, Identifier, SigningPackage};
 use frost_core::{self as frost, Ciphersuite};
 use frost_rerandomized::RandomizedCiphersuite;
+use frost_secp256k1_tr::Secp256K1Sha256TR;
+use k256::elliptic_curve::{bigint::U256, ops::Reduce};
+use k256::{FieldBytes, Scalar};
 
 use super::args::Args;
 use super::args::ProcessedArgs;
@@ -62,6 +74,53 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
     if let Err(e) = r {
         let _ = comms.cleanup_on_error().await;
         return Err(e);
+    }
+
+    // ---------------------------------------------------------------------
+    // Patch s = s + e·t after shares are combined (automatic for secp256k1-tr)
+    if C::ID == Secp256K1Sha256TR::ID && !pargs.signature.is_empty() {
+        // fetch P or fail with a plain String so `?` coerces into `Box<dyn Error>`
+        let p_bytes = pargs
+            .internal_key
+            .clone()
+            .ok_or::<Box<dyn std::error::Error>>(
+                "internal_key missing; run DKG with secp256k1-tr ciphersuite".into(),
+            )?;
+        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).unwrap();
+        let (q_key, tweak_scalar) = tweak_internal_key(p_xonly);
+
+        // we signed exactly one message
+        let msg = &pargs.messages[0];
+
+        // read raw sig
+        let mut sig =
+            std::fs::read(&pargs.signature).wrap_err("cannot read signature file for tweaking")?;
+        if sig.len() != 64 {
+            return Err(eyre!("signature length is not 64 bytes").into());
+        }
+
+        // e = H(Rx ‖ Qx ‖ m)
+        let r_x = &sig[..32];
+        let e_scalar_secp = SecScalar::from_be_bytes(
+            sha256::Hash::hash(&[r_x, &q_key.serialize(), msg].concat()).to_byte_array(),
+        )
+        .unwrap();
+
+        // Convert raw big-endian bytes into k256 scalars **with modular reduction**
+        let s_orig = <Scalar as Reduce<U256>>::reduce_bytes(FieldBytes::from_slice(&sig[32..]));
+        let t_k = <Scalar as Reduce<U256>>::reduce_bytes(FieldBytes::from_slice(
+            &tweak_scalar.to_be_bytes(),
+        ));
+        let e_k = <Scalar as Reduce<U256>>::reduce_bytes(FieldBytes::from_slice(
+            &e_scalar_secp.to_be_bytes(),
+        ));
+
+        // new_s = s + t·e  (mod n)
+        let new_s = s_orig + t_k * e_k;
+        sig[32..].copy_from_slice(new_s.to_bytes().as_slice());
+
+        std::fs::write(&pargs.signature, &sig)?;
+        eprintln!("Taproot tweak applied to {}", pargs.signature);
     }
 
     Ok(())
