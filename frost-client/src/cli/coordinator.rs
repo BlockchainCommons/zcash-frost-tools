@@ -161,7 +161,7 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
         )
         .unwrap();
 
-        // Convert raw big‑endian bytes into k256 scalars **with modular reduction**
+        // Convert raw big-endian bytes into k256 scalars **with modular reduction**
         let s_orig  =
             <Scalar as Reduce<U256>>::reduce_bytes(FieldBytes::from_slice(&sig[32..]));
         let t_k =
