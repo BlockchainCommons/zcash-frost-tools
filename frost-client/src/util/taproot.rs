@@ -14,7 +14,7 @@ use bitcoin::{
 /// Returns **(Q, t)** where
 /// * **Q** is the x-only tweaked key that actually appears in the output
 /// * **t** is the scalar tweak (mod *n*) that must be **added to every
-///   signer’s secret-key share** before a key-path signature is valid.
+///   signer's secret-key share** before a key-path signature is valid.
 pub fn tweak_internal_key(
     internal: XOnlyPublicKey,
 ) -> (XOnlyPublicKey, Scalar) {
