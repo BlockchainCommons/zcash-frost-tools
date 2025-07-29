@@ -16,9 +16,9 @@ pub fn cli<C: Ciphersuite + 'static + MaybeIntoEvenY>(
 
     let mut rng = thread_rng();
 
-    let (shares, pubkeys) = trusted_dealer(&config, &mut rng)?;
+        let (shares, public_key_package) = trusted_dealer(&config, &mut rng)?;
 
-    print_values::<C>(args, &shares, &pubkeys, logger)?;
+    print_values::<C>(args, &shares, &public_key_package, logger)?;
 
     Ok(())
 }

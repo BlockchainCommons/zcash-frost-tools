@@ -72,26 +72,28 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
     let (shares, mut public_key_package) =
         trusted_dealer::trusted_dealer::<C, _>(&trusted_dealer_config, &mut rng)?;
 
-    // Always apply Taproot tweak for secp256k1-tr ciphersuite
-    let mut internal_key_bytes = None;
-    if C::ID == Secp256K1Sha256TR::ID {
+    // For secp256k1-tr, apply Taproot tweak to ensure compatibility with BIP-341
+    let internal_key_bytes = if C::ID == Secp256K1Sha256TR::ID {
         // (1) untweaked P
-        let p_bytes = public_key_package.verifying_key().serialize()?;
-        internal_key_bytes = Some(p_bytes.clone());
-        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).expect("x-only key");
+        let p_bytes = public_key_package.verifying_key().serialize()
+            .expect("failed to serialize verifying key");
+        let internal_key_bytes = Some(p_bytes.clone());
+        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes[1..33]).expect("x-only key");
         // (2) tweak -> Q
         let (q_key, _t) = tweak_internal_key(p_xonly);
-        // (3) build a fresh PublicKeyPackage with the tweaked key Q
-        use frost_core::{keys::PublicKeyPackage, VerifyingKey};
+        // (3) build a fresh PublicKeyPackage with the tweaked key Q
+        let q_vk = frost_core::VerifyingKey::<C>::deserialize(&q_key.serialize())
+            .expect("cannot deserialize tweaked key");
 
-        let q_vk = VerifyingKey::<C>::deserialize(&q_key.serialize())
-            .map_err(|_| eyre!("cannot deserialize tweaked key"))?;
-
-        public_key_package = PublicKeyPackage::new(
-            public_key_package.verifying_shares().clone(), // getter from derive_getters
+        public_key_package = frost_core::keys::PublicKeyPackage::new(
+            public_key_package.verifying_shares().clone(),
             q_vk,
         );
-    }
+
+        internal_key_bytes
+    } else {
+        None
+    };
 
     // First pass over configs; create participants map
     let mut participants = BTreeMap::new();

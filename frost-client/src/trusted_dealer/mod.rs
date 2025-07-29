@@ -23,9 +23,12 @@ use trusted_dealer_keygen::{split_secret, trusted_dealer_keygen};
 // code uses generics, this trait is used to convert if needed depending on the
 // ciphersuite.
 //
-// If you are adding a new ciphersuite to this tool which does note require
-// this, just implement it and the default implementation (which does nothing)
-// will suffice. See below.
+// For secp256k1-tr, this trait also handles Taproot tweaking to ensure
+// consistent behavior across all code paths.
+//
+// If you are adding a new ciphersuite to this tool which does not require
+// these transformations, just implement it and the default implementation
+// (which does nothing) will suffice. See below.
 pub trait MaybeIntoEvenY: Ciphersuite {
     fn into_even_y(
         secret_shares_and_public_key_package: (
@@ -36,7 +39,8 @@ pub trait MaybeIntoEvenY: Ciphersuite {
         BTreeMap<Identifier<Self>, SecretShare<Self>>,
         PublicKeyPackage<Self>,
     ) {
-        secret_shares_and_public_key_package
+        let (shares, pkg) = secret_shares_and_public_key_package;
+        (shares, pkg)
     }
 }
 
@@ -65,7 +69,6 @@ impl MaybeIntoEvenY for reddsa::frost::redpallas::PallasBlake2b512 {
     }
 }
 
-#[allow(clippy::type_complexity)]
 pub fn trusted_dealer<C: Ciphersuite + 'static + MaybeIntoEvenY, R: RngCore + CryptoRng>(
     config: &Config,
     rng: &mut R,
