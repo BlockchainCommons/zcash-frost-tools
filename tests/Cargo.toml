@@ -18,12 +18,14 @@ tempfile = "3.0"
 frost-ed25519 = { workspace = true, features = ["serde"] }
 frost-secp256k1-tr = { workspace = true, features = ["serde"] }
 frost-core = { workspace = true, features = ["serde"] }
+frost-rerandomized = { workspace = true, features = ["serde"] }
 frost-client = { workspace = true }
 frostd = { workspace = true }
 rand = { workspace = true }
 tempfile = "3.8"
 serde_json = { workspace = true }
 bitcoin = { workspace = true }
+k256 = { workspace = true }
 
 [features]
 default = []
