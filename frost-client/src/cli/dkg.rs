@@ -6,7 +6,7 @@ use std::{
 
 use eyre::{eyre, Context as _, OptionExt};
 
-use frost_core::Ciphersuite;
+use frost_core::{Ciphersuite, keys::KeyPackage};
 use frost_ed25519::Ed25519Sha512;
 use frost_secp256k1_tr::Secp256K1Sha256TR;
 use bitcoin::key::XOnlyPublicKey;
@@ -109,8 +109,18 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
     };
 
     // Generate key shares
-    let (key_package, mut public_key_package, pubkey_map) =
+    let (mut key_package, mut public_key_package, pubkey_map) =
         cli::cli_for_processed_args::<C>(dkg_config, &mut input, &mut output).await?;
+
+    if C::ID == Secp256K1Sha256TR::ID {
+        use frost_secp256k1_tr::keys::Tweak;
+        let bytes = key_package.serialize()?;
+        let kp_tr = frost_secp256k1_tr::keys::KeyPackage::deserialize(&bytes)?;
+        let kp_tr = kp_tr.tweak::<&[u8]>(None);
+        let bytes = kp_tr.serialize()?;
+        key_package = KeyPackage::deserialize(&bytes)?;
+    }
+
     let key_package = Zeroizing::new(key_package);
 
     // ---------------------------------------------------------------------
