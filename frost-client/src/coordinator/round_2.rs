@@ -44,44 +44,50 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         let rng = thread_rng();
         Some(Randomizer::new(rng, signing_package)?)
     } else if args.randomizers.is_empty() && C::ID == Secp256K1Sha256TR::ID {
-        // For secp256k1-tr, compute BIP-341 Taproot tweak 
+        // For secp256k1-tr, compute BIP-341 Taproot tweak
         // Use the verifying key from the public key package as the internal key
         use bitcoin::secp256k1::{Secp256k1, XOnlyPublicKey};
         use bitcoin::key::TapTweak;
         use bitcoin::taproot::TapTweakHash;
         use bitcoin::hashes::Hash;
         use k256::{Scalar, elliptic_curve::PrimeField};
-        
+
         // Get the internal public key from the FROST verifying key
         let verifying_key = participants.pub_key_package.verifying_key();
         let vk_bytes = verifying_key.serialize()
             .map_err(|e| format!("Failed to serialize verifying key: {}", e))?;
-        
+
         // Extract x-only public key (skip the 0x02/0x03 prefix for compressed format)
         let internal_key = XOnlyPublicKey::from_slice(&vk_bytes[1..])
             .map_err(|e| format!("Invalid internal key from verifying key: {}", e))?;
-        
+
         let secp = Secp256k1::verification_only();
-        
+
         // Compute the tweak: Q = P + H_TapTweak(P || 0) * G
         let (_tweaked_key, _parity) = internal_key.tap_tweak(&secp, None);
-        
+
         // Get the tweak hash directly
         let tweak_hash = TapTweakHash::from_key_and_tweak(internal_key, None);
         let tweak_bytes = tweak_hash.to_byte_array();
-        
-        // Convert the 32-byte tweak to a scalar using from_repr
+
+        // Convert the 32-byte tweak to a scalar
+        // For k256, from_repr returns a CtOption<Scalar>
         let tweak_scalar = Scalar::from_repr(tweak_bytes.into())
-            .unwrap_or_else(|| panic!("Failed to convert tweak hash to scalar"));
-        
+            .unwrap_or_else(|| {
+                // If the hash is larger than the curve order, reduce it by taking modulo
+                // This is a rare case but can happen with some hash values
+                use k256::elliptic_curve::ops::Reduce;
+                <Scalar as Reduce<k256::U256>>::reduce_bytes(&tweak_bytes.into())
+            });
+
         // Create randomizer from the tweak scalar
         let randomizer_bytes = tweak_scalar.to_bytes();
         let randomizer = Randomizer::deserialize(&randomizer_bytes)?;
-        
+
         eprintln!("Applied BIP-341 Taproot tweak for secp256k1-tr signing");
         eprintln!("Internal key (x-only): {}", hex::encode(internal_key.serialize()));
         eprintln!("Tweak scalar: {}", hex::encode(&tweak_bytes));
-        
+
         Some(randomizer)
     } else if args.randomizers.is_empty() {
         None

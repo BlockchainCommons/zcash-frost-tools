@@ -23,8 +23,8 @@ fn test_taproot_tweak_computation() {
     let tweak_scalar = Scalar::from_be_bytes(tweak_hash.to_byte_array()).unwrap();
     let (manual_tweaked_key, _) = internal_key.add_tweak(&secp, &tweak_scalar).unwrap();
 
-    // Convert to k256 Scalar for FROST rerandomized
-    let k256_tweak_scalar = K256Scalar::from_repr(tweak_hash.to_byte_array().into()).unwrap();
+    // Convert to k256 Scalar for FROST rerandomized using the reducing method
+    let k256_tweak_scalar = K256Scalar::from_be_bytes_reduced(&tweak_hash.to_byte_array());
 
     // Verify that both methods produce the same result (compare the inner XOnlyPublicKey)
     assert_eq!(tweaked_key.to_x_only_public_key(), manual_tweaked_key, "Both tweak methods should produce the same result");
@@ -56,7 +56,7 @@ fn test_coordinator_tweak_function() {
 
     // This is the function logic from coordinator/round_2.rs
     let tweak_hash = TapTweakHash::from_key_and_tweak(internal_key, None);
-    let tweak_scalar = K256Scalar::from_repr(tweak_hash.to_byte_array().into()).unwrap();
+    let tweak_scalar = K256Scalar::from_be_bytes_reduced(&tweak_hash.to_byte_array());
 
     // Verify the scalar was created correctly
     assert_eq!(tweak_scalar.to_bytes().len(), 32);
