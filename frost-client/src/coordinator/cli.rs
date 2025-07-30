@@ -50,73 +50,100 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
     // For secp256k1-tr, replace the PublicKeyPackage with one containing the tweaked key Q
     // This ensures that signing operations use Q for challenge computation
     if C::ID == Secp256K1Sha256TR::ID {
-        // Get the internal key from args or derive it from the verifying key
-        let internal_key_result = match &pargs.internal_key {
-            Some(internal_key_bytes) => {
-                bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
-                    .map_err(|e| format!("Invalid internal key: {}", e))
-            }
+        // 1️⃣ Extract the internal key P *before* editing the package
+        let internal_key_bytes = match &pargs.internal_key {
+            Some(bytes) => bytes.clone(),
             None => {
-                // Safe fallback now that dealer always gives 0x02 keys
+                // Safe fallback: extract P from the original (untweaked) verifying key
                 let vk_bytes = participants_config.pub_key_package.verifying_key().serialize()
                     .map_err(|e| format!("Failed to serialize verifying key: {}", e))?;
                 if vk_bytes[0] != 0x02 {
                     return Err("Odd-parity verifying key; dealer bug?".into());
                 }
                 // Extract the 32-byte x-only key (strip the 0x02 prefix)
-                bitcoin::secp256k1::XOnlyPublicKey::from_slice(&vk_bytes[1..])
-                    .map_err(|e| format!("Invalid derived internal key: {}", e))
+                vk_bytes[1..].to_vec()
             }
         };
 
-        if let Ok(internal_key) = internal_key_result {
-            let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
+        // 2️⃣ Ensure pargs has the internal key for round_2.rs to use
+        let mut pargs_mut = pargs.clone();
+        pargs_mut.internal_key = Some(internal_key_bytes.clone());
 
-            // Create tweaked verifying key
-            let tweaked_key_bytes = {
-                let mut bytes = vec![0x02]; // Use even parity prefix
-                bytes.extend_from_slice(&tweaked_key.serialize());
-                bytes
-            };
-
-            if let Ok(tweaked_verifying_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
-                // Replace the PublicKeyPackage with one containing Q
-                use frost_core::keys::PublicKeyPackage;
-                participants_config.pub_key_package = PublicKeyPackage::new(
-                    participants_config.pub_key_package.verifying_shares().clone(),  // Keep original shares
-                    tweaked_verifying_key,  // Use Q instead of P
-                );
-
-                eprintln!("✅ Updated ParticipantsConfig.pub_key_package: P → Q for Taproot signing");
-                eprintln!("    Internal key (P): {}", hex::encode(internal_key.serialize()));
-                eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
-            } else {
-                eprintln!("⚠️  Failed to create tweaked verifying key for ParticipantsConfig");
-            }
-        } else {
-            eprintln!("⚠️  Failed to get internal key for Taproot signing");
+        // 3️⃣ Parse the internal key and compute (Q, t) from P
+        if internal_key_bytes.len() != 32 {
+            return Err("Internal key must be exactly 32 bytes".into());
         }
+        let mut internal_key_array = [0u8; 32];
+        internal_key_array.copy_from_slice(&internal_key_bytes);
+
+        let internal_key = bitcoin::secp256k1::XOnlyPublicKey::from_slice(&internal_key_array)
+            .map_err(|e| format!("Invalid internal key: {}", e))?;
+        let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
+
+        // 4️⃣ Create tweaked verifying key and overwrite the package with Q *after* we have P & t
+        let tweaked_key_bytes = {
+            let mut bytes = vec![0x02]; // Use even parity prefix
+            bytes.extend_from_slice(&tweaked_key.serialize());
+            bytes
+        };
+
+        if let Ok(tweaked_verifying_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
+            // Replace the PublicKeyPackage with one containing Q
+            use frost_core::keys::PublicKeyPackage;
+            participants_config.pub_key_package = PublicKeyPackage::new(
+                participants_config.pub_key_package.verifying_shares().clone(),  // Keep original shares
+                tweaked_verifying_key,  // Use Q instead of P
+            );
+
+            eprintln!("✅ Updated ParticipantsConfig.pub_key_package: P → Q for Taproot signing");
+            eprintln!("    Internal key (P): {}", hex::encode(internal_key.serialize()));
+            eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
+        } else {
+            return Err("Failed to create tweaked verifying key for ParticipantsConfig".into());
+        }
+
+        // Use the updated pargs with the internal key set
+        let signing_package =
+            build_signing_package(&pargs_mut, logger, participants_config.commitments.clone());
+
+        let r = send_signing_package_and_get_signature_shares(
+            &pargs_mut,
+            &mut *comms,
+            reader,
+            logger,
+            participants_config,
+            &signing_package,
+        )
+        .await;
+
+        if let Err(e) = r {
+            let _ = comms.cleanup_on_error().await;
+            return Err(e);
+        }
+
+        Ok(())
+    } else {
+        // Non-Taproot: use original pargs
+        let signing_package =
+            build_signing_package(&pargs, logger, participants_config.commitments.clone());
+
+        let r = send_signing_package_and_get_signature_shares(
+            &pargs,
+            &mut *comms,
+            reader,
+            logger,
+            participants_config,
+            &signing_package,
+        )
+        .await;
+
+        if let Err(e) = r {
+            let _ = comms.cleanup_on_error().await;
+            return Err(e);
+        }
+
+        Ok(())
     }
-
-    let signing_package =
-        build_signing_package(&pargs, logger, participants_config.commitments.clone());
-
-    let r = send_signing_package_and_get_signature_shares(
-        &pargs,
-        &mut *comms,
-        reader,
-        logger,
-        participants_config,
-        &signing_package,
-    )
-    .await;
-
-    if let Err(e) = r {
-        let _ = comms.cleanup_on_error().await;
-        return Err(e);
-    }
-
-    Ok(())
 }
 
 pub fn build_signing_package<C: Ciphersuite>(
