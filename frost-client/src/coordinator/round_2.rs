@@ -184,12 +184,51 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         let generic_signature = frost_core::Signature::<C>::deserialize(&signature_bytes)?;
         generic_signature
     } else {
-        // For all other ciphersuites (including non-tweaked keys),
-        // use the standard aggregate function
+        // For all other ciphersuites, use the standard aggregate function
+        // For secp256k1-tr with the tweaked key approach, create a temporary
+        // PublicKeyPackage with the tweaked key Q for challenge computation
+        // while keeping the original shares that sum to P
+        let aggregate_pubkey_package = if C::ID.as_bytes() == b"FROST-secp256k1-SHA256-TR-v1" {
+            // Get the internal key P and compute tweaked key Q
+            let internal_key = if let Some(internal_key_bytes) = &args.internal_key {
+                bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
+                    .map_err(|e| format!("Invalid internal key: {}", e))?
+            } else {
+                return Err("Internal key required for secp256k1-tr aggregation (should be set by cli.rs)".into());
+            };
+
+            let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
+
+            // Create the tweaked verifying key Q for challenge computation
+            let tweaked_key_bytes = {
+                let mut bytes = vec![0x02]; // Use even parity prefix
+                bytes.extend_from_slice(&tweaked_key.serialize());
+                bytes
+            };
+
+            if let Ok(tweaked_frost_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
+                eprintln!("✅ Using tweaked key Q for FROST aggregation challenge computation");
+                eprintln!("    Package verifying key (P): {}", hex::encode(participants.pub_key_package.verifying_key().serialize().unwrap_or_default()));
+                eprintln!("    Tweaked key for challenge (Q): {}", hex::encode(tweaked_frost_key.serialize().unwrap_or_default()));
+
+                // Create temporary PublicKeyPackage with Q for aggregation
+                use frost_core::keys::PublicKeyPackage;
+                PublicKeyPackage::new(
+                    participants.pub_key_package.verifying_shares().clone(), // Keep original shares that sum to P
+                    tweaked_frost_key, // Use Q for challenge computation
+                )
+            } else {
+                return Err("Failed to create tweaked verifying key for aggregation".into());
+            }
+        } else {
+            // Non-Taproot: use original package
+            participants.pub_key_package.clone()
+        };
+
         frost::aggregate::<C>(
             signing_package,
             &signatures_list,
-            &participants.pub_key_package,
+            &aggregate_pubkey_package,
         )
         .unwrap()
     };
