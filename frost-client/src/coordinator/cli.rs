@@ -80,13 +80,13 @@ pub fn build_signing_package<C: Ciphersuite>(
             if let Ok(internal_key) = bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes) {
                 // Compute the expected tweaked key Q = P + H_TapTweak(P || 0) * G
                 let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
-                
+
                 // Check what key is in the public key package
                 let package_vk = args.public_key_package.verifying_key();
                 let package_vk_bytes = package_vk.serialize().expect("Failed to serialize package verifying key");
                 let package_key = bitcoin::secp256k1::XOnlyPublicKey::from_slice(&package_vk_bytes[1..])
                     .expect("Invalid key from public key package");
-                
+
                 if package_key == internal_key {
                     eprintln!("✅ Public key package contains internal key P (correct for Taproot)");
                 } else if package_key == tweaked_key {
@@ -106,10 +106,10 @@ pub fn build_signing_package<C: Ciphersuite>(
             eprintln!("⚠️  Warning: secp256k1-tr requires --internal-key flag for Taproot operations");
         }
     }
-    
+
     // Create standard SigningPackage - no hot-patching
     let signing_package = SigningPackage::new(commitments, &args.messages[0]);
-    
+
     if args.cli {
         print_signing_package(logger, &signing_package);
     }

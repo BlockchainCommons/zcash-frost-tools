@@ -148,14 +148,14 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         // Convert the tweak_scalar to the format expected by aggregate_with_tweak
         // The function expects an Option<&[u8]> for merkle_root, not a scalar
         // The tweak is applied internally by the function based on the internal key
-        
+
         // Since we can't easily convert generic types to secp256k1-tr specific types safely,
         // we'll serialize and deserialize the components
-        
+
         // Serialize the signing package
         let signing_package_bytes = signing_package.serialize()?;
         let secp_signing_package = frost_secp256k1_tr::SigningPackage::deserialize(&signing_package_bytes)?;
-        
+
         // Convert signature shares
         let mut secp_signatures = std::collections::BTreeMap::new();
         for (identifier, share) in &signatures_list {
@@ -165,7 +165,7 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
             let secp_share = frost_secp256k1_tr::round2::SignatureShare::deserialize(&share_bytes)?;
             secp_signatures.insert(secp_id, secp_share);
         }
-        
+
         // Convert public key package
         let pkg_bytes = participants.pub_key_package.serialize()?;
         let secp_pub_key_package = frost_secp256k1_tr::keys::PublicKeyPackage::deserialize(&pkg_bytes)?;

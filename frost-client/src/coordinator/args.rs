@@ -167,7 +167,7 @@ impl<C: Ciphersuite + 'static> ProcessedArgs<C> {
         let internal_key = if let Some(internal_key_hex) = &args.internal_key {
             Some(hex::decode(internal_key_hex.trim())?)
         } else {
-            // For secp256k1-tr, we need the internal key P but we don't have a way to 
+            // For secp256k1-tr, we need the internal key P but we don't have a way to
             // extract it reliably from the public key package since the hot-patch may
             // have already converted it to Q. This requires an explicit --internal-key flag.
             None
