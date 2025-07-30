@@ -14,6 +14,9 @@ pub fn trusted_dealer_keygen<C: Ciphersuite, R: RngCore + CryptoRng>(
     rng: &mut R,
 ) -> Result<(BTreeMap<Identifier<C>, SecretShare<C>>, PublicKeyPackage<C>), Error<C>> {
 
+    // Cache the ciphersuite check outside the loop
+    let is_taproot = C::ID.as_bytes() == b"FROST-secp256k1-SHA256-TR-v1";
+
     loop {
         // Always hand Default to the dealer; that is the only option in v2
         let (shares, pubkeys) = frost::keys::generate_with_dealer(
@@ -24,7 +27,7 @@ pub fn trusted_dealer_keygen<C: Ciphersuite, R: RngCore + CryptoRng>(
         )?;
 
         // Non‑Taproot suites: return immediately
-        if C::ID.as_bytes() != b"FROST-secp256k1-SHA256-TR-v1" {
+        if !is_taproot {
             for (_k, v) in shares.clone() {
                 frost::keys::KeyPackage::try_from(v)?;
             }
@@ -33,10 +36,11 @@ pub fn trusted_dealer_keygen<C: Ciphersuite, R: RngCore + CryptoRng>(
 
         // Taproot suite: keep only even‑Y aggregates
         if pubkeys.verifying_key().serialize()?[0] == 0x02 {
+            // ✅ even‑Y, validate shares and return
             for (_k, v) in shares.clone() {
                 frost::keys::KeyPackage::try_from(v)?;
             }
-            return Ok((shares, pubkeys));          // ✅ even‑Y, done
+            return Ok((shares, pubkeys));
         }
         // otherwise loop again; statistically succeeds next try half the time
     }
@@ -50,36 +54,36 @@ pub fn split_secret<C: Ciphersuite, R: RngCore + CryptoRng>(
 ) -> Result<(BTreeMap<Identifier<C>, SecretShare<C>>, PublicKeyPackage<C>), Error<C>> {
     let secret_key = SigningKey::deserialize(&config.secret)?;
 
-    loop {
-        // Always hand Default to the dealer; that is the only option in v2
-        let (shares, pubkeys) = frost::keys::split(
-            &secret_key,
-            config.max_signers,
-            config.min_signers,
-            IdentifierList::<C>::Default,
-            rng,
-        )?;
+    let (shares, pubkeys) = frost::keys::split(
+        &secret_key,
+        config.max_signers,
+        config.min_signers,
+        IdentifierList::<C>::Default,
+        rng,
+    )?;
 
-        // Non‑Taproot suites: return immediately
-        if C::ID.as_bytes() != b"FROST-secp256k1-SHA256-TR-v1" {
-            for (_k, v) in shares.clone() {
-                frost::keys::KeyPackage::try_from(v)?;
-            }
-            return Ok((shares, pubkeys));
+    // For non‑Taproot suites, return immediately
+    if C::ID.as_bytes() != b"FROST-secp256k1-SHA256-TR-v1" {
+        for (_k, v) in shares.clone() {
+            frost::keys::KeyPackage::try_from(v)?;
         }
-
-        // Taproot suite: keep only even‑Y aggregates
-        if pubkeys.verifying_key().serialize()?[0] == 0x02 {
-            for (_k, v) in shares.clone() {
-                frost::keys::KeyPackage::try_from(v)?;
-            }
-            return Ok((shares, pubkeys));          // ✅ even‑Y, done
-        }
-        // otherwise loop again; statistically succeeds next try half the time
+        return Ok((shares, pubkeys));
     }
-}
 
-#[cfg(test)]
+    // Taproot suite: handle deterministic odd-Y keys by failing fast
+    if pubkeys.verifying_key().serialize()?[0] == 0x03 {
+        // The secret produces an odd-Y key, which would break Taproot internal key extraction
+        // User needs to regenerate the secret or use a different one
+        // (This affects ~50% of random secrets; the other 50% work fine)
+        return Err(frost::Error::MalformedSigningKey);
+    }
+
+    // Even-Y key: validate shares and return
+    for (_k, v) in shares.clone() {
+        frost::keys::KeyPackage::try_from(v)?;
+    }
+    Ok((shares, pubkeys))
+}#[cfg(test)]
 mod tests {
 
     use frost_ed25519::keys::IdentifierList;
