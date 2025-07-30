@@ -147,20 +147,16 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
 
         // Cast the generic types to the specific secp256k1-tr types
         // This is safe because we've already checked C::ID == Secp256K1Sha256TR::ID
-        use std::mem;
 
         // SAFETY: We've verified that C is Secp256K1Sha256TR via the type ID check above
-        let secp_signing_package: &frost_core::SigningPackage<frost_secp256k1_tr::Secp256K1Sha256TR> =
-            unsafe { mem::transmute(signing_package) };
-        let secp_signatures: &std::collections::BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256TR>, frost_core::round2::SignatureShare<frost_secp256k1_tr::Secp256K1Sha256TR>> =
-            unsafe { mem::transmute(&signatures_list) };
-        let secp_pub_key_package: &frost_core::keys::PublicKeyPackage<frost_secp256k1_tr::Secp256K1Sha256TR> =
-            unsafe { mem::transmute(&participants.pub_key_package) };
+        let secp_signing_package = signing_package as *const SigningPackage<C> as *const frost_core::SigningPackage<frost_secp256k1_tr::Secp256K1Sha256TR>;
+        let secp_signatures = &signatures_list as *const _ as *const std::collections::BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256TR>, frost_core::round2::SignatureShare<frost_secp256k1_tr::Secp256K1Sha256TR>>;
+        let secp_pub_key_package = &participants.pub_key_package as *const _ as *const frost_core::keys::PublicKeyPackage<frost_secp256k1_tr::Secp256K1Sha256TR>;
 
         let secp_signature = aggregate_with_tweak(
-            secp_signing_package,
-            secp_signatures,
-            secp_pub_key_package,
+            unsafe { &*secp_signing_package },
+            unsafe { &*secp_signatures },
+            unsafe { &*secp_pub_key_package },
             None,  // merkle_root for BIP-341 basic Taproot (no script tree)
         )?;
 
