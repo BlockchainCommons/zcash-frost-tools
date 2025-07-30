@@ -12,7 +12,6 @@ use eyre::eyre;
 use crate::cipher::{PrivateKey, PublicKey};
 use frost_core::{keys::PublicKeyPackage, Ciphersuite, Identifier};
 use frost_rerandomized::Randomizer;
-use frost_secp256k1_tr;
 
 use super::input::read_from_file_or_stdin;
 
@@ -164,21 +163,13 @@ impl<C: Ciphersuite + 'static> ProcessedArgs<C> {
         println!("Processing randomizer {:?}", args.randomizer);
         let randomizers = read_randomizers(&args.randomizer, output, input)?;
 
-        // Parse internal_key if provided, or extract from public_key_package for secp256k1-tr
+        // Parse internal_key if provided
         let internal_key = if let Some(internal_key_hex) = &args.internal_key {
             Some(hex::decode(internal_key_hex.trim())?)
-        } else if C::ID == frost_secp256k1_tr::Secp256K1Sha256TR::ID {
-            // For secp256k1-tr, default to using the verifying_key from the public key package
-            // as the internal key P (before tweaking)
-            let vk_bytes = public_key_package.verifying_key().serialize()?;
-            // Remove the compression prefix to get x-only key
-            if vk_bytes.len() >= 33 {
-                Some(vk_bytes[1..33].to_vec())  // Extract x-only (32 bytes) from compressed key
-            } else {
-                eprintln!("Warning: Could not extract internal key from public key package for secp256k1-tr");
-                None
-            }
         } else {
+            // For secp256k1-tr, we need the internal key P but we don't have a way to 
+            // extract it reliably from the public key package since the hot-patch may
+            // have already converted it to Q. This requires an explicit --internal-key flag.
             None
         };
 

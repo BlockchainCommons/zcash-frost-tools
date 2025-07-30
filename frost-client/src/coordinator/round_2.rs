@@ -135,7 +135,7 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
             bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
                 .map_err(|e| format!("Invalid internal key: {}", e))?
         } else {
-            return Err("Internal key required for secp256k1-tr aggregation".into());
+            return Err("Internal key required for secp256k1-tr aggregation. Use --internal-key flag.".into());
         };
 
         // Compute the BIP-341 tweak scalar using our utility function
@@ -145,23 +145,39 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         eprintln!("Internal key: {}", hex::encode(internal_key.serialize()));
         eprintln!("Tweak scalar: {}", hex::encode(tweak_scalar.to_be_bytes()));
 
-        // Cast the generic types to the specific secp256k1-tr types
-        // This is safe because we've already checked C::ID == Secp256K1Sha256TR::ID
-
-        // SAFETY: We've verified that C is Secp256K1Sha256TR via the type ID check above
-        let secp_signing_package = signing_package as *const SigningPackage<C> as *const frost_core::SigningPackage<frost_secp256k1_tr::Secp256K1Sha256TR>;
-        let secp_signatures = &signatures_list as *const _ as *const std::collections::BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256TR>, frost_core::round2::SignatureShare<frost_secp256k1_tr::Secp256K1Sha256TR>>;
-        let secp_pub_key_package = &participants.pub_key_package as *const _ as *const frost_core::keys::PublicKeyPackage<frost_secp256k1_tr::Secp256K1Sha256TR>;
+        // Convert the tweak_scalar to the format expected by aggregate_with_tweak
+        // The function expects an Option<&[u8]> for merkle_root, not a scalar
+        // The tweak is applied internally by the function based on the internal key
+        
+        // Since we can't easily convert generic types to secp256k1-tr specific types safely,
+        // we'll serialize and deserialize the components
+        
+        // Serialize the signing package
+        let signing_package_bytes = signing_package.serialize()?;
+        let secp_signing_package = frost_secp256k1_tr::SigningPackage::deserialize(&signing_package_bytes)?;
+        
+        // Convert signature shares
+        let mut secp_signatures = std::collections::BTreeMap::new();
+        for (identifier, share) in &signatures_list {
+            let id_bytes = identifier.serialize();
+            let share_bytes = share.serialize();
+            let secp_id = frost_secp256k1_tr::Identifier::deserialize(&id_bytes)?;
+            let secp_share = frost_secp256k1_tr::round2::SignatureShare::deserialize(&share_bytes)?;
+            secp_signatures.insert(secp_id, secp_share);
+        }
+        
+        // Convert public key package
+        let pkg_bytes = participants.pub_key_package.serialize()?;
+        let secp_pub_key_package = frost_secp256k1_tr::keys::PublicKeyPackage::deserialize(&pkg_bytes)?;
 
         let secp_signature = aggregate_with_tweak(
-            unsafe { &*secp_signing_package },
-            unsafe { &*secp_signatures },
-            unsafe { &*secp_pub_key_package },
+            &secp_signing_package,
+            &secp_signatures,
+            &secp_pub_key_package,
             None,  // merkle_root for BIP-341 basic Taproot (no script tree)
         )?;
 
         // Convert the secp256k1-tr signature back to the generic type
-        // by serializing and deserializing
         let signature_bytes = secp_signature.serialize()?;
         let generic_signature = frost_core::Signature::<C>::deserialize(&signature_bytes)?;
         generic_signature
