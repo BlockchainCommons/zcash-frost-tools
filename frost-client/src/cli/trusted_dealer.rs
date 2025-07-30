@@ -127,7 +127,16 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
         // into a KeyPackage without first checking if
         // [`SecretShare::commitment()`] is the same for all participants using
         // a broadcast channel.
-        let key_package: KeyPackage<C> = share.clone().try_into()?;
+        let mut key_package: KeyPackage<C> = share.clone().try_into()?;
+        if C::ID == Secp256K1Sha256TR::ID {
+            use frost_secp256k1_tr::keys::Tweak;
+            // Convert to the secp256k1-tr concrete type via serialization
+            let bytes = key_package.serialize()?;
+            let kp_tr = frost_secp256k1_tr::keys::KeyPackage::deserialize(&bytes)?;
+            let kp_tr = kp_tr.tweak::<&[u8]>(None);
+            let bytes = kp_tr.serialize()?;
+            key_package = KeyPackage::deserialize(&bytes)?;
+        }
         let group = Group {
             ciphersuite: C::ID.to_string(),
             description: description.clone(),
