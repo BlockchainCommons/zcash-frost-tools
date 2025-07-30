@@ -125,110 +125,12 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
             &randomizer_params,
         )
         .unwrap()
-    } else if C::ID == Secp256K1Sha256TR::ID {
-        // For secp256k1-tr without explicit randomizer, use aggregate_with_tweak
-        // to properly add the BIP-341 tweak term to the s-value
-        use frost_secp256k1_tr::aggregate_with_tweak;
-        use crate::util::taproot::tweak_internal_key;
-
-        // Get the internal key to compute the tweak
-        // Note: cli.rs ensures this is always set for secp256k1-tr
-        let internal_key = if let Some(internal_key_bytes) = &args.internal_key {
-            bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
-                .map_err(|e| format!("Invalid internal key: {}", e))?
-        } else {
-            return Err("Internal key required for secp256k1-tr aggregation (should be set by cli.rs)".into());
-        };
-
-        // Compute the BIP-341 tweak scalar using our utility function
-        let (_tweaked_key, tweak_scalar) = tweak_internal_key(internal_key);
-
-        eprintln!("Using aggregate_with_tweak for BIP-341 Taproot signature");
-        eprintln!("Internal key: {}", hex::encode(internal_key.serialize()));
-        eprintln!("Tweak scalar: {}", hex::encode(tweak_scalar.to_be_bytes()));
-
-        // Convert the tweak_scalar to the format expected by aggregate_with_tweak
-        // The function expects an Option<&[u8]> for merkle_root, not a scalar
-        // The tweak is applied internally by the function based on the internal key
-
-        // Since we can't easily convert generic types to secp256k1-tr specific types safely,
-        // we'll serialize and deserialize the components
-
-        // Serialize the signing package
-        let signing_package_bytes = signing_package.serialize()?;
-        let secp_signing_package = frost_secp256k1_tr::SigningPackage::deserialize(&signing_package_bytes)?;
-
-        // Convert signature shares
-        let mut secp_signatures = std::collections::BTreeMap::new();
-        for (identifier, share) in &signatures_list {
-            let id_bytes = identifier.serialize();
-            let share_bytes = share.serialize();
-            let secp_id = frost_secp256k1_tr::Identifier::deserialize(&id_bytes)?;
-            let secp_share = frost_secp256k1_tr::round2::SignatureShare::deserialize(&share_bytes)?;
-            secp_signatures.insert(secp_id, secp_share);
-        }
-
-        // Convert public key package
-        let pkg_bytes = participants.pub_key_package.serialize()?;
-        let secp_pub_key_package = frost_secp256k1_tr::keys::PublicKeyPackage::deserialize(&pkg_bytes)?;
-
-        let secp_signature = aggregate_with_tweak(
-            &secp_signing_package,
-            &secp_signatures,
-            &secp_pub_key_package,
-            None,  // merkle_root for BIP-341 basic Taproot (no script tree)
-        )?;
-
-        // Convert the secp256k1-tr signature back to the generic type
-        let signature_bytes = secp_signature.serialize()?;
-        let generic_signature = frost_core::Signature::<C>::deserialize(&signature_bytes)?;
-        generic_signature
     } else {
-        // For all other ciphersuites, use the standard aggregate function
-        // For secp256k1-tr with the tweaked key approach, create a temporary
-        // PublicKeyPackage with the tweaked key Q for challenge computation
-        // while keeping the original shares that sum to P
-        let aggregate_pubkey_package = if C::ID.as_bytes() == b"FROST-secp256k1-SHA256-TR-v1" {
-            // Get the internal key P and compute tweaked key Q
-            let internal_key = if let Some(internal_key_bytes) = &args.internal_key {
-                bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
-                    .map_err(|e| format!("Invalid internal key: {}", e))?
-            } else {
-                return Err("Internal key required for secp256k1-tr aggregation (should be set by cli.rs)".into());
-            };
-
-            let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
-
-            // Create the tweaked verifying key Q for challenge computation
-            let tweaked_key_bytes = {
-                let mut bytes = vec![0x02]; // Use even parity prefix
-                bytes.extend_from_slice(&tweaked_key.serialize());
-                bytes
-            };
-
-            if let Ok(tweaked_frost_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
-                eprintln!("✅ Using tweaked key Q for FROST aggregation challenge computation");
-                eprintln!("    Package verifying key (P): {}", hex::encode(participants.pub_key_package.verifying_key().serialize().unwrap_or_default()));
-                eprintln!("    Tweaked key for challenge (Q): {}", hex::encode(tweaked_frost_key.serialize().unwrap_or_default()));
-
-                // Create temporary PublicKeyPackage with Q for aggregation
-                use frost_core::keys::PublicKeyPackage;
-                PublicKeyPackage::new(
-                    participants.pub_key_package.verifying_shares().clone(), // Keep original shares that sum to P
-                    tweaked_frost_key, // Use Q for challenge computation
-                )
-            } else {
-                return Err("Failed to create tweaked verifying key for aggregation".into());
-            }
-        } else {
-            // Non-Taproot: use original package
-            participants.pub_key_package.clone()
-        };
-
+        // For all ciphersuites, use the standard aggregate function
         frost::aggregate::<C>(
             signing_package,
             &signatures_list,
-            &aggregate_pubkey_package,
+            &participants.pub_key_package,
         )
         .unwrap()
     };

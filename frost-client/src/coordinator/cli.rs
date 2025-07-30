@@ -42,7 +42,7 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
     }
 
     let r = get_commitments(&pargs, &mut *comms, reader, logger).await;
-    let Ok(mut participants_config) = r else {
+    let Ok(participants_config) = r else {
         let _ = comms.cleanup_on_error().await;
         return Err(r.unwrap_err());
     };
@@ -87,15 +87,8 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
             bytes
         };
 
-        if let Ok(tweaked_verifying_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
-            // Replace the PublicKeyPackage with one containing Q
-            use frost_core::keys::PublicKeyPackage;
-            participants_config.pub_key_package = PublicKeyPackage::new(
-                participants_config.pub_key_package.verifying_shares().clone(),  // Keep original shares
-                tweaked_verifying_key,  // Use Q instead of P
-            );
-
-            eprintln!("✅ SigningPackage uses tweaked key Q (pub_key_package unchanged)");
+        if let Ok(_tweaked_verifying_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
+            eprintln!("✅ SigningPackage will use tweaked key Q (pub_key_package left on P)");
             eprintln!("    Internal key (P): {}", hex::encode(internal_key.serialize()));
             eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
         } else {
@@ -152,9 +145,28 @@ pub fn build_signing_package<C: Ciphersuite>(
     commitments: BTreeMap<Identifier<C>, SigningCommitments<C>>,
 ) -> SigningPackage<C> {
     // Create the SigningPackage with the provided commitments
-    // Note: For secp256k1-tr, the ParticipantsConfig.pub_key_package has already been
-    // updated to contain the tweaked key Q in the main coordinator flow
     let signing_package = SigningPackage::new(commitments, &args.messages[0]);
+
+    // For secp256k1-tr, the challenge computation needs to use the tweaked key Q
+    // Since SigningPackage doesn't have a direct group_public_key field,
+    // we'll rely on the secp256k1-tr ciphersuite to handle this correctly
+    // in the aggregate function when it receives the proper internal key info
+    if C::ID == Secp256K1Sha256TR::ID {
+        if let Some(internal_key_bytes) = &args.internal_key {
+            if internal_key_bytes.len() == 32 {
+                let mut internal_key_array = [0u8; 32];
+                internal_key_array.copy_from_slice(internal_key_bytes);
+
+                if let Ok(internal_key) = bitcoin::secp256k1::XOnlyPublicKey::from_slice(&internal_key_array) {
+                    let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
+                    eprintln!("📦 SigningPackage created for Taproot with:");
+                    eprintln!("    Internal key (P): {}", hex::encode(internal_key.serialize()));
+                    eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
+                    eprintln!("    Challenge computation will use Q via secp256k1-tr ciphersuite");
+                }
+            }
+        }
+    }
 
     if args.cli {
         print_signing_package(logger, &signing_package);
