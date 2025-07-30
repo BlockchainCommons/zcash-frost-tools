@@ -4,6 +4,8 @@ use std::io::{BufRead, Write};
 use frost::{round1::SigningCommitments, Identifier, SigningPackage};
 use frost_core::{self as frost, Ciphersuite};
 use frost_rerandomized::RandomizedCiphersuite;
+use frost_secp256k1_tr::Secp256K1Sha256TR;
+use bitcoin::key::XOnlyPublicKey;
 
 use super::args::Args;
 use super::args::ProcessedArgs;
@@ -13,6 +15,7 @@ use super::comms::socket::SocketComms;
 use super::comms::Comms;
 use super::round_1::get_commitments;
 use super::round_2::send_signing_package_and_get_signature_shares;
+use crate::util::taproot::tweak_internal_key;
 
 pub async fn cli<C: RandomizedCiphersuite + 'static>(
     args: &Args,
@@ -72,7 +75,41 @@ pub fn build_signing_package<C: Ciphersuite>(
     logger: &mut dyn Write,
     commitments: BTreeMap<Identifier<C>, SigningCommitments<C>>,
 ) -> SigningPackage<C> {
+    // Standard signing package creation - the FROST library will derive
+    // the group public key from the public key package
     let signing_package = SigningPackage::new(commitments, &args.messages[0]);
+
+    // For secp256k1-tr, log the Taproot tweak information for debugging
+    if C::ID == Secp256K1Sha256TR::ID {
+        if let Some(internal_key_bytes) = &args.internal_key {
+            let internal_key = XOnlyPublicKey::from_slice(internal_key_bytes)
+                .expect("Invalid internal key");
+
+            let (tweaked_key, tweak_scalar) = tweak_internal_key(internal_key);
+
+            eprintln!("Internal key (x-only): {}", hex::encode(internal_key.serialize()));
+            eprintln!("Tweak scalar: {}", hex::encode(tweak_scalar.to_be_bytes()));
+            eprintln!("Tweaked key (x-only): {}", hex::encode(tweaked_key.serialize()));
+
+            // Verify that the public key package contains the tweaked key
+            let package_vk = args.public_key_package.verifying_key();
+            let package_vk_bytes = package_vk.serialize().expect("Failed to serialize package verifying key");
+            let package_key = XOnlyPublicKey::from_slice(&package_vk_bytes[1..])
+                .expect("Invalid key from public key package");
+
+            if package_key == tweaked_key {
+                eprintln!("✅ Public key package contains the correct tweaked key Q");
+            } else {
+                eprintln!("⚠️  Warning: Public key package key doesn't match computed tweaked key");
+                eprintln!("    Package key: {}", hex::encode(package_key.serialize()));
+                eprintln!("    Expected key: {}", hex::encode(tweaked_key.serialize()));
+                eprintln!("    This may cause signature verification failures!");
+            }
+        } else {
+            eprintln!("Warning: secp256k1-tr requires internal_key to be set for verification");
+        }
+    }
+
     if args.cli {
         print_signing_package(logger, &signing_package);
     }
