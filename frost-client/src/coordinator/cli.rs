@@ -95,7 +95,7 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
                 tweaked_verifying_key,  // Use Q instead of P
             );
 
-            eprintln!("✅ Updated ParticipantsConfig.pub_key_package: P → Q for Taproot signing");
+            eprintln!("✅ SigningPackage uses tweaked key Q (pub_key_package unchanged)");
             eprintln!("    Internal key (P): {}", hex::encode(internal_key.serialize()));
             eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
         } else {
