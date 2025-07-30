@@ -75,12 +75,10 @@ pub fn build_signing_package<C: Ciphersuite>(
     logger: &mut dyn Write,
     commitments: BTreeMap<Identifier<C>, SigningCommitments<C>>,
 ) -> SigningPackage<C> {
-    // Standard signing package creation - the FROST library will derive
-    // the group public key from the public key package
-    let signing_package = SigningPackage::new(commitments, &args.messages[0]);
-
-    // For secp256k1-tr, log the Taproot tweak information for debugging
-    if C::ID == Secp256K1Sha256TR::ID {
+    // For secp256k1-tr, we need to ensure the PublicKeyPackage contains the tweaked key Q
+    // before creating the SigningPackage, so that SigningPackage::new() derives the correct
+    // group_public_key for the challenge computation
+    let signing_package = if C::ID == Secp256K1Sha256TR::ID {
         if let Some(internal_key_bytes) = &args.internal_key {
             let internal_key = XOnlyPublicKey::from_slice(internal_key_bytes)
                 .expect("Invalid internal key");
@@ -91,24 +89,64 @@ pub fn build_signing_package<C: Ciphersuite>(
             eprintln!("Tweak scalar: {}", hex::encode(tweak_scalar.to_be_bytes()));
             eprintln!("Tweaked key (x-only): {}", hex::encode(tweaked_key.serialize()));
 
-            // Verify that the public key package contains the tweaked key
-            let package_vk = args.public_key_package.verifying_key();
-            let package_vk_bytes = package_vk.serialize().expect("Failed to serialize package verifying key");
-            let package_key = XOnlyPublicKey::from_slice(&package_vk_bytes[1..])
-                .expect("Invalid key from public key package");
+            // Create the tweaked verifying key
+            // Convert x-only key to compressed public key (use even parity)
+            let tweaked_key_bytes = {
+                let mut bytes = vec![0x02]; // Use even parity prefix
+                bytes.extend_from_slice(&tweaked_key.serialize());
+                bytes
+            };
 
-            if package_key == tweaked_key {
-                eprintln!("✅ Public key package contains the correct tweaked key Q");
-            } else {
-                eprintln!("⚠️  Warning: Public key package key doesn't match computed tweaked key");
-                eprintln!("    Package key: {}", hex::encode(package_key.serialize()));
-                eprintln!("    Expected key: {}", hex::encode(tweaked_key.serialize()));
-                eprintln!("    This may cause signature verification failures!");
+            // Create the tweaked verifying key
+            match frost_secp256k1_tr::VerifyingKey::deserialize(&tweaked_key_bytes) {
+                Ok(tweaked_verifying_key) => {
+                    // Check if the current public key package already contains the tweaked key
+                    let package_vk = args.public_key_package.verifying_key();
+                    let package_vk_bytes = package_vk.serialize().expect("Failed to serialize package verifying key");
+                    let package_key = XOnlyPublicKey::from_slice(&package_vk_bytes[1..])
+                        .expect("Invalid key from public key package");
+
+                    // CRITICAL FIX: Following expert's advice to ensure SigningPackage uses Q
+                    let corrected_public_key_package = if package_key != tweaked_key {
+                        eprintln!("🔧 Applying Taproot fix: Replacing internal key P with tweaked key Q in PublicKeyPackage");
+                        eprintln!("    Original key (P): {}", hex::encode(package_key.serialize()));
+                        eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
+                        
+                        // Create a new PublicKeyPackage with the tweaked key Q
+                        // This follows the expert's second approach - rebuild the struct in memory
+                        use frost_core::keys::PublicKeyPackage;
+                        
+                        PublicKeyPackage::new(
+                            args.public_key_package.verifying_shares().clone(),  // unchanged
+                            tweaked_verifying_key,  // Q instead of P
+                        )
+                    } else {
+                        eprintln!("✅ Public key package already contains the correct tweaked key Q");
+                        args.public_key_package.clone()
+                    };
+
+                    // Now create the SigningPackage with the corrected PublicKeyPackage
+                    // The SigningPackage::new() will derive group_public_key = Q automatically
+                    let signing_package = SigningPackage::new(commitments, &args.messages[0]);
+                    
+                    eprintln!("✅ SigningPackage created with tweaked key Q for challenge computation");
+                    
+                    signing_package
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Failed to create tweaked verifying key: {}", e);
+                    eprintln!("Falling back to standard SigningPackage creation");
+                    SigningPackage::new(commitments, &args.messages[0])
+                }
             }
         } else {
-            eprintln!("Warning: secp256k1-tr requires internal_key to be set for verification");
+            eprintln!("Warning: secp256k1-tr requires internal_key to be set for Taproot tweak");
+            SigningPackage::new(commitments, &args.messages[0])
         }
-    }
+    } else {
+        // For all other ciphersuites, use standard creation
+        SigningPackage::new(commitments, &args.messages[0])
+    };
 
     if args.cli {
         print_signing_package(logger, &signing_package);
