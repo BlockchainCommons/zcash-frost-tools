@@ -50,32 +50,51 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
     // For secp256k1-tr, replace the PublicKeyPackage with one containing the tweaked key Q
     // This ensures that signing operations use Q for challenge computation
     if C::ID == Secp256K1Sha256TR::ID {
-        if let Some(internal_key_bytes) = &pargs.internal_key {
-            if let Ok(internal_key) = bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes) {
-                let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
-
-                // Create tweaked verifying key
-                let tweaked_key_bytes = {
-                    let mut bytes = vec![0x02]; // Use even parity prefix
-                    bytes.extend_from_slice(&tweaked_key.serialize());
-                    bytes
-                };
-
-                if let Ok(tweaked_verifying_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
-                    // Replace the PublicKeyPackage with one containing Q
-                    use frost_core::keys::PublicKeyPackage;
-                    participants_config.pub_key_package = PublicKeyPackage::new(
-                        participants_config.pub_key_package.verifying_shares().clone(),  // Keep original shares
-                        tweaked_verifying_key,  // Use Q instead of P
-                    );
-
-                    eprintln!("✅ Updated ParticipantsConfig.pub_key_package: P → Q for Taproot signing");
-                    eprintln!("    Internal key (P): {}", hex::encode(internal_key.serialize()));
-                    eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
-                } else {
-                    eprintln!("⚠️  Failed to create tweaked verifying key for ParticipantsConfig");
-                }
+        // Get the internal key from args or derive it from the verifying key
+        let internal_key_result = match &pargs.internal_key {
+            Some(internal_key_bytes) => {
+                bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
+                    .map_err(|e| format!("Invalid internal key: {}", e))
             }
+            None => {
+                // Safe fallback now that dealer always gives 0x02 keys
+                let vk_bytes = participants_config.pub_key_package.verifying_key().serialize()
+                    .map_err(|e| format!("Failed to serialize verifying key: {}", e))?;
+                if vk_bytes[0] != 0x02 {
+                    return Err("Odd-parity verifying key; dealer bug?".into());
+                }
+                // Extract the 32-byte x-only key (strip the 0x02 prefix)
+                bitcoin::secp256k1::XOnlyPublicKey::from_slice(&vk_bytes[1..])
+                    .map_err(|e| format!("Invalid derived internal key: {}", e))
+            }
+        };
+
+        if let Ok(internal_key) = internal_key_result {
+            let (tweaked_key, _tweak_scalar) = crate::util::taproot::tweak_internal_key(internal_key);
+
+            // Create tweaked verifying key
+            let tweaked_key_bytes = {
+                let mut bytes = vec![0x02]; // Use even parity prefix
+                bytes.extend_from_slice(&tweaked_key.serialize());
+                bytes
+            };
+
+            if let Ok(tweaked_verifying_key) = frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
+                // Replace the PublicKeyPackage with one containing Q
+                use frost_core::keys::PublicKeyPackage;
+                participants_config.pub_key_package = PublicKeyPackage::new(
+                    participants_config.pub_key_package.verifying_shares().clone(),  // Keep original shares
+                    tweaked_verifying_key,  // Use Q instead of P
+                );
+
+                eprintln!("✅ Updated ParticipantsConfig.pub_key_package: P → Q for Taproot signing");
+                eprintln!("    Internal key (P): {}", hex::encode(internal_key.serialize()));
+                eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
+            } else {
+                eprintln!("⚠️  Failed to create tweaked verifying key for ParticipantsConfig");
+            }
+        } else {
+            eprintln!("⚠️  Failed to get internal key for Taproot signing");
         }
     }
 

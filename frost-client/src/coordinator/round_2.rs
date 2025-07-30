@@ -52,12 +52,23 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         use bitcoin::hashes::Hash;
         use k256::{Scalar, elliptic_curve::PrimeField};
 
-        // Get the internal public key P from the args (stored during DKG)
-        let internal_key = if let Some(internal_key_bytes) = &args.internal_key {
-            XOnlyPublicKey::from_slice(internal_key_bytes)
-                .map_err(|e| format!("Invalid internal key: {}", e))?
-        } else {
-            return Err("Internal key required for secp256k1-tr signing".into());
+        // Get the internal public key P from the args or derive it from the verifying key
+        let internal_key = match &args.internal_key {
+            Some(internal_key_bytes) => {
+                XOnlyPublicKey::from_slice(internal_key_bytes)
+                    .map_err(|e| format!("Invalid internal key: {}", e))?
+            }
+            None => {
+                // Safe fallback now that dealer always gives 0x02 keys
+                let vk_bytes = participants.pub_key_package.verifying_key().serialize()
+                    .map_err(|e| format!("Failed to serialize verifying key: {}", e))?;
+                if vk_bytes[0] != 0x02 {
+                    return Err("Odd-parity verifying key; dealer bug?".into());
+                }
+                // Extract the 32-byte x-only key (strip the 0x02 prefix)
+                XOnlyPublicKey::from_slice(&vk_bytes[1..])
+                    .map_err(|e| format!("Invalid derived internal key: {}", e))?
+            }
         };
 
         let secp = Secp256k1::verification_only();
@@ -131,11 +142,22 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         use crate::util::taproot::tweak_internal_key;
 
         // Get the internal key to compute the tweak
-        let internal_key = if let Some(internal_key_bytes) = &args.internal_key {
-            bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
-                .map_err(|e| format!("Invalid internal key: {}", e))?
-        } else {
-            return Err("Internal key required for secp256k1-tr aggregation. Use --internal-key flag.".into());
+        let internal_key = match &args.internal_key {
+            Some(internal_key_bytes) => {
+                bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
+                    .map_err(|e| format!("Invalid internal key: {}", e))?
+            }
+            None => {
+                // Safe fallback now that dealer always gives 0x02 keys
+                let vk_bytes = participants.pub_key_package.verifying_key().serialize()
+                    .map_err(|e| format!("Failed to serialize verifying key: {}", e))?;
+                if vk_bytes[0] != 0x02 {
+                    return Err("Odd-parity verifying key; dealer bug?".into());
+                }
+                // Extract the 32-byte x-only key (strip the 0x02 prefix)
+                bitcoin::secp256k1::XOnlyPublicKey::from_slice(&vk_bytes[1..])
+                    .map_err(|e| format!("Invalid derived internal key: {}", e))?
+            }
         };
 
         // Compute the BIP-341 tweak scalar using our utility function

@@ -74,8 +74,9 @@ pub struct Args {
     #[arg(short, long, default_value_t = 443)]
     pub port: u16,
 
-    /// The internal key (hex-encoded) for Taproot tweaking. Required for
-    /// secp256k1-tr ciphersuite when using Taproot tweaked keys.
+    /// The internal key (hex-encoded) for Taproot tweaking. Optional for
+    /// secp256k1-tr ciphersuite - if not provided, will be derived from the
+    /// group verifying key. Useful for interoperability testing.
     #[arg(long)]
     pub internal_key: Option<String>,
 }
