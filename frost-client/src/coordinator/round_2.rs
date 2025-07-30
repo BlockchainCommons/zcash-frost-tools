@@ -124,6 +124,51 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
             &randomizer_params,
         )
         .unwrap()
+    } else if C::ID == Secp256K1Sha256TR::ID {
+        // For secp256k1-tr without explicit randomizer, use aggregate_with_tweak
+        // to properly add the BIP-341 tweak term to the s-value
+        use frost_secp256k1_tr::aggregate_with_tweak;
+        use crate::util::taproot::tweak_internal_key;
+
+        // Get the internal key to compute the tweak
+        let internal_key = if let Some(internal_key_bytes) = &args.internal_key {
+            bitcoin::secp256k1::XOnlyPublicKey::from_slice(internal_key_bytes)
+                .map_err(|e| format!("Invalid internal key: {}", e))?
+        } else {
+            return Err("Internal key required for secp256k1-tr aggregation".into());
+        };
+
+        // Compute the BIP-341 tweak scalar using our utility function
+        let (_tweaked_key, tweak_scalar) = tweak_internal_key(internal_key);
+
+        eprintln!("Using aggregate_with_tweak for BIP-341 Taproot signature");
+        eprintln!("Internal key: {}", hex::encode(internal_key.serialize()));
+        eprintln!("Tweak scalar: {}", hex::encode(tweak_scalar.to_be_bytes()));
+
+        // Cast the generic types to the specific secp256k1-tr types
+        // This is safe because we've already checked C::ID == Secp256K1Sha256TR::ID
+        use std::mem;
+
+        // SAFETY: We've verified that C is Secp256K1Sha256TR via the type ID check above
+        let secp_signing_package: &frost_core::SigningPackage<frost_secp256k1_tr::Secp256K1Sha256TR> =
+            unsafe { mem::transmute(signing_package) };
+        let secp_signatures: &std::collections::BTreeMap<frost_core::Identifier<frost_secp256k1_tr::Secp256K1Sha256TR>, frost_core::round2::SignatureShare<frost_secp256k1_tr::Secp256K1Sha256TR>> =
+            unsafe { mem::transmute(&signatures_list) };
+        let secp_pub_key_package: &frost_core::keys::PublicKeyPackage<frost_secp256k1_tr::Secp256K1Sha256TR> =
+            unsafe { mem::transmute(&participants.pub_key_package) };
+
+        let secp_signature = aggregate_with_tweak(
+            secp_signing_package,
+            secp_signatures,
+            secp_pub_key_package,
+            None,  // merkle_root for BIP-341 basic Taproot (no script tree)
+        )?;
+
+        // Convert the secp256k1-tr signature back to the generic type
+        // by serializing and deserializing
+        let signature_bytes = secp_signature.serialize()?;
+        let generic_signature = frost_core::Signature::<C>::deserialize(&signature_bytes)?;
+        generic_signature
     } else {
         // For all other ciphersuites (including non-tweaked keys),
         // use the standard aggregate function

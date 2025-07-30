@@ -111,15 +111,25 @@ pub fn build_signing_package<C: Ciphersuite>(
                         eprintln!("🔧 Applying Taproot fix: Replacing internal key P with tweaked key Q in PublicKeyPackage");
                         eprintln!("    Original key (P): {}", hex::encode(package_key.serialize()));
                         eprintln!("    Tweaked key (Q):  {}", hex::encode(tweaked_key.serialize()));
-                        
+
                         // Create a new PublicKeyPackage with the tweaked key Q
                         // This follows the expert's second approach - rebuild the struct in memory
                         use frost_core::keys::PublicKeyPackage;
-                        
-                        PublicKeyPackage::new(
-                            args.public_key_package.verifying_shares().clone(),  // unchanged
-                            tweaked_verifying_key,  // Q instead of P
-                        )
+
+                        // Create the tweaked verifying key using the generic C type
+                        match frost_core::VerifyingKey::<C>::deserialize(&tweaked_key_bytes) {
+                            Ok(generic_tweaked_key) => {
+                                PublicKeyPackage::new(
+                                    args.public_key_package.verifying_shares().clone(),  // unchanged
+                                    generic_tweaked_key,  // Q instead of P
+                                )
+                            }
+                            Err(e) => {
+                                eprintln!("⚠️  Failed to deserialize tweaked key as generic type: {}", e);
+                                eprintln!("Falling back to original PublicKeyPackage");
+                                args.public_key_package.clone()
+                            }
+                        }
                     } else {
                         eprintln!("✅ Public key package already contains the correct tweaked key Q");
                         args.public_key_package.clone()
@@ -128,9 +138,9 @@ pub fn build_signing_package<C: Ciphersuite>(
                     // Now create the SigningPackage with the corrected PublicKeyPackage
                     // The SigningPackage::new() will derive group_public_key = Q automatically
                     let signing_package = SigningPackage::new(commitments, &args.messages[0]);
-                    
+
                     eprintln!("✅ SigningPackage created with tweaked key Q for challenge computation");
-                    
+
                     signing_package
                 }
                 Err(e) => {
