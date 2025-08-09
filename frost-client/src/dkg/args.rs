@@ -18,8 +18,8 @@ pub struct ProcessedArgs<C: Ciphersuite> {
     /// and print values to stdout, ignoring other flags.
     pub cli: bool,
 
-    /// HTTP mode. If enabled, it will use HTTP communication with a
-    /// FROST server.
+    /// HTTP mode. If enabled, it will use network communication with a
+    /// FROST server (either HTTP or HTTPS).
     pub http: bool,
 
     /// IP to connect to, if using HTTP mode.
@@ -27,6 +27,10 @@ pub struct ProcessedArgs<C: Ciphersuite> {
 
     /// Port to connect to, if using HTTP mode.
     pub port: u16,
+
+    /// When in HTTP mode, whether to use HTTPS (TLS) or plain HTTP.
+    /// If true, the client will use https:// scheme; if false, http://.
+    pub use_https: bool,
 
     /// The participant's communication private key for HTTP mode.
     pub comm_privkey: Option<PrivateKey>,
@@ -70,6 +74,7 @@ where
             http: false,
             ip: String::new(),
             port: 0,
+            use_https: false,
             comm_privkey: None,
             comm_pubkey: None,
             comm_participant_pubkey_getter: None,

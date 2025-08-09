@@ -39,8 +39,9 @@ pub struct HTTPComms<C: Ciphersuite> {
 
 impl<C: Ciphersuite> HTTPComms<C> {
     pub fn new(args: &ProcessedArgs<C>) -> Result<Self, Box<dyn Error>> {
+        let protocol = if args.http { "http" } else { "https" };
         Ok(Self {
-            client: Client::new(format!("https://{}:{}", args.ip, args.port)),
+            client: Client::new(format!("{}://{}:{}", protocol, args.ip, args.port)),
             session_id: None,
             args: args.clone(),
             state: CoordinatorSessionState::new(

@@ -101,7 +101,32 @@ impl Client {
     }
 
     pub async fn send(&self, args: &api::SendArgs) -> Result<(), Error> {
-        self.call("send", args).await
+        // This endpoint returns an empty body on success; avoid JSON decoding.
+        let req = self
+            .client
+            .post(format!("{}/{}", self.host_port, "send"))
+            .json(args);
+        let req = if let Some(token) = &self.access_token {
+            req.bearer_auth(token.to_string())
+        } else {
+            req
+        };
+        let response = req.send().await?;
+        if !response.status().is_success() {
+            if response.status() == reqwest::StatusCode::INTERNAL_SERVER_ERROR {
+                let err = response.json::<api::LowError>().await?;
+                let err: api::Error = err.into();
+                Err(err.into())
+            } else {
+                Err(Error::ConnectionError(
+                    response
+                        .error_for_status()
+                        .expect_err("we know the response is not success"),
+                ))
+            }
+        } else {
+            Ok(())
+        }
     }
 
     pub async fn receive(&self, args: &api::ReceiveArgs) -> Result<api::ReceiveOutput, Error> {

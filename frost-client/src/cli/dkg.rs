@@ -58,8 +58,13 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
 
     let config = Config::read(config_path.clone())?;
 
-    let server_url_parsed =
-        Url::parse(&format!("https://{server_url}")).wrap_err("error parsing server-url")?;
+    // Accept full URLs with scheme; if no scheme provided, default to HTTPS.
+    let server_url_parsed = if server_url.contains("://") {
+        Url::parse(&server_url).wrap_err("error parsing server-url")?
+    } else {
+        // Default to HTTPS when no scheme is provided
+        Url::parse(&format!("https://{server_url}")).wrap_err("error parsing server-url")?
+    };
 
     let comm_pubkey = config
         .communication_key
@@ -79,6 +84,7 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
 
     let dkg_config = args::ProcessedArgs {
         cli: false,
+        // Enter network mode; scheme is HTTPS by default
         http: true,
         ip: server_url_parsed
             .host_str()
@@ -87,6 +93,8 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
         port: server_url_parsed
             .port_or_known_default()
             .expect("always works for https"),
+    // Use HTTPS unless the user explicitly provided http://
+    use_https: server_url_parsed.scheme() != "http",
         comm_privkey: Some(
             config
                 .communication_key

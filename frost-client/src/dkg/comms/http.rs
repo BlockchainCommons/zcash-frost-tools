@@ -40,8 +40,12 @@ pub struct HTTPComms<C: Ciphersuite> {
 
 impl<C: Ciphersuite> HTTPComms<C> {
     pub fn new(args: &ProcessedArgs<C>) -> Result<Self, Box<dyn Error>> {
+    // Build base URL using scheme derived from processed args
+        // Always use HTTPS for HTTP mode transport. The `http` flag selects the
+        // transport type (HTTP vs CLI), not the URL scheme.
+        let protocol = if args.use_https { "https" } else { "http" };
         Ok(Self {
-            client: Client::new(format!("https://{}:{}", args.ip, args.port)),
+            client: Client::new(format!("{}://{}:{}", protocol, args.ip, args.port)),
             session_id: None,
             args: args.clone(),
             state: DKGSessionState::default(),
