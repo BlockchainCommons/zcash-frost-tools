@@ -116,7 +116,7 @@ where
     C: Ciphersuite,
 {
     pub fn new(args: &ProcessedArgs<C>) -> Result<Self, Box<dyn Error>> {
-        let protocol = if args.http { "http" } else { "https" };
+        let protocol = if args.use_https { "https" } else { "http" };
         Ok(Self {
             client: Client::new(format!("{}://{}:{}", protocol, args.ip, args.port)),
             session_id: Uuid::parse_str(&args.session_id).ok(),

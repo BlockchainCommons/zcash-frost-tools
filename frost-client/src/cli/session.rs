@@ -32,6 +32,13 @@ pub async fn list(args: &Command) -> Result<(), Box<dyn Error>> {
         return Err(eyre!("must specify either server_url or group").into());
     };
 
+    // Accept full URLs with scheme; if no scheme provided, default to HTTPS
+    let base_url = if server_url.contains("://") {
+        server_url.clone()
+    } else {
+        format!("https://{server_url}")
+    };
+
     let comm_privkey = config
         .communication_key
         .clone()
@@ -45,7 +52,7 @@ pub async fn list(args: &Command) -> Result<(), Box<dyn Error>> {
         .pubkey
         .clone();
 
-    let mut client = Client::new(format!("https://{server_url}"));
+    let mut client = Client::new(base_url);
 
     let mut rng = thread_rng();
 

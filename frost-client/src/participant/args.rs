@@ -69,6 +69,10 @@ pub struct ProcessedArgs<C: Ciphersuite> {
     /// Port to connect to, if using HTTP mode.
     pub port: u16,
 
+    /// When in HTTP mode, whether to use HTTPS (TLS) or plain HTTP.
+    /// If true, use https://; if false, use http://.
+    pub use_https: bool,
+
     /// Optional Session ID
     pub session_id: String,
 
@@ -114,6 +118,7 @@ impl<C: Ciphersuite + 'static> ProcessedArgs<C> {
             key_package,
             ip: args.ip.clone(),
             port: args.port,
+            use_https: true,
             session_id: args.session_id.clone(),
             comm_privkey: None,
             comm_pubkey: None,

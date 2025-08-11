@@ -77,7 +77,7 @@ impl Client {
 
     /// Log out from the server. This will clear the cached access token.
     pub async fn logout(&mut self) -> Result<(), Error> {
-        self.call::<(), ()>("login", &()).await?;
+    self.call::<(), ()>("logout", &()).await?;
         self.access_token = None;
         Ok(())
     }

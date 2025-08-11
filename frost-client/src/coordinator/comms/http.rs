@@ -39,7 +39,8 @@ pub struct HTTPComms<C: Ciphersuite> {
 
 impl<C: Ciphersuite> HTTPComms<C> {
     pub fn new(args: &ProcessedArgs<C>) -> Result<Self, Box<dyn Error>> {
-        let protocol = if args.http { "http" } else { "https" };
+        // Always use HTTPS by default; fall back to HTTP only if explicitly requested.
+        let protocol = if args.use_https { "https" } else { "http" };
         Ok(Self {
             client: Client::new(format!("{}://{}:{}", protocol, args.ip, args.port)),
             session_id: None,
@@ -116,6 +117,17 @@ impl<C: Ciphersuite + 'static> Comms<C> for HTTPComms<C> {
             comm_privkey.clone(),
             self.args.signers.keys().cloned().collect(),
         )?;
+
+        // If the coordinator is also among the signers, they must run
+        // `frost-client participant` for themselves to provide commitments
+        // and signature share; otherwise the coordinator will wait forever.
+        if let Some(me) = &self.args.comm_pubkey {
+            if self.args.signers.contains_key(me) {
+                eprintln!(
+                    "Note: Your key is included in --signers. Run 'frost-client participant' with your own config to contribute your commitments and signature share."
+                );
+            }
+        }
 
         eprint!("Waiting for participants to send their commitments...");
 

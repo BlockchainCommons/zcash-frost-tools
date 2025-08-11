@@ -119,6 +119,10 @@ pub struct ProcessedArgs<C: Ciphersuite> {
     /// Port to connect to, if using HTTP mode.
     pub port: u16,
 
+    /// When in HTTP mode, whether to use HTTPS (TLS) or plain HTTP.
+    /// If true, the client will use https:// scheme; if false, http://.
+    pub use_https: bool,
+
     /// The coordinator's communication private key for HTTP mode.
     pub comm_privkey: Option<PrivateKey>,
 
@@ -185,6 +189,7 @@ impl<C: Ciphersuite + 'static> ProcessedArgs<C> {
             signature: args.signature.clone(),
             ip: args.ip.clone(),
             port: args.port,
+            use_https: true,
             comm_privkey: None,
             comm_pubkey: None,
             internal_key,

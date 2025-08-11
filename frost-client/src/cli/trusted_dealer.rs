@@ -74,15 +74,24 @@ pub(crate) fn trusted_dealer_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + '
 
     // For secp256k1-tr, apply Taproot tweak to ensure compatibility with BIP-341
     let internal_key_bytes = if C::ID == Secp256K1Sha256TR::ID {
-        // (1) untweaked P
-        let p_bytes = public_key_package.verifying_key().serialize()
+        // (1) untweaked P (accept 32/33/65B encodings; store P as 32B x-only)
+        let p_bytes = public_key_package
+            .verifying_key()
+            .serialize()
             .expect("failed to serialize verifying key");
-        let internal_key_bytes = Some(p_bytes.clone());
-        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes[1..33]).expect("x-only key");
+        let p_xonly = match p_bytes.len() {
+            32 => XOnlyPublicKey::from_slice(&p_bytes).expect("x-only key"),
+            33 => XOnlyPublicKey::from_slice(&p_bytes[1..]).expect("compressed x-only key"),
+            65 => XOnlyPublicKey::from_slice(&p_bytes[1..33]).expect("uncompressed x-only key"),
+            _ => panic!("unexpected verifying key length"),
+        };
+        let internal_key_bytes = Some(p_xonly.serialize().to_vec());
         // (2) tweak -> Q
         let (q_key, _t) = tweak_internal_key(p_xonly);
-        // (3) build a fresh PublicKeyPackage with the tweaked key Q
-        let q_vk = frost_core::VerifyingKey::<C>::deserialize(&q_key.serialize())
+        // (3) build a fresh PublicKeyPackage with the tweaked key Q using compressed SEC1 form
+        let mut q_sec1 = vec![0x02u8];
+        q_sec1.extend_from_slice(&q_key.serialize());
+        let q_vk = frost_core::VerifyingKey::<C>::deserialize(&q_sec1)
             .expect("cannot deserialize tweaked key");
 
         public_key_package = frost_core::keys::PublicKeyPackage::new(

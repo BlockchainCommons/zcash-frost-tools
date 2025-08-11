@@ -81,8 +81,12 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
     } else {
         group.server_url.clone().ok_or_eyre("server-url required")?
     };
-    let server_url_parsed =
-        Url::parse(&format!("https://{server_url}")).wrap_err("error parsing server-url")?;
+    // Accept full URLs with scheme; if no scheme provided, default to HTTPS.
+    let server_url_parsed = if server_url.contains("://") {
+        Url::parse(&server_url).wrap_err("error parsing server-url")?
+    } else {
+        Url::parse(&format!("https://{server_url}")).wrap_err("error parsing server-url")?
+    };
 
     let signers = signers
         .iter()
@@ -106,13 +110,14 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
         messages: messages_vec.clone(),
         randomizers: args::read_randomizers(&randomizer, &mut output, &mut input)?,
         signature: signature.clone(),
-        ip: server_url_parsed
+    ip: server_url_parsed
             .host_str()
             .ok_or_eyre("host missing in URL")?
             .to_owned(),
-        port: server_url_parsed
+    port: server_url_parsed
             .port_or_known_default()
             .expect("always works for https"),
+    use_https: server_url_parsed.scheme() != "http",
         comm_privkey: Some(
             config
                 .communication_key
@@ -135,13 +140,22 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
 
     // ---------------------------------------------------------------------
     // Patch s = s + e·t  after shares are combined (automatic for secp256k1-tr)
-    if C::ID == Secp256K1Sha256TR::ID && !signature.is_empty() {
+    if C::ID == Secp256K1Sha256TR::ID && !signature.is_empty() && signature != "-" {
     // fetch P or fail with a plain String so `?` coerces into `Box<dyn Error>`
     let p_bytes = group
         .internal_key
         .clone()
         .ok_or::<Box<dyn std::error::Error>>("internal_key missing; run DKG with secp256k1-tr ciphersuite".into())?;
-        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).unwrap();
+        // Accept 32/33/65-byte encodings and convert to x-only
+        let p_xonly = match p_bytes.len() {
+            32 => XOnlyPublicKey::from_slice(&p_bytes)
+                .map_err(|e| eyre!("invalid x-only internal key: {e}"))?,
+            33 => XOnlyPublicKey::from_slice(&p_bytes[1..])
+                .map_err(|e| eyre!("invalid compressed internal key (x-only): {e}"))?,
+            65 => XOnlyPublicKey::from_slice(&p_bytes[1..33])
+                .map_err(|e| eyre!("invalid uncompressed internal key (x-only): {e}"))?,
+            l => return Err(eyre!("unexpected verifying key length: {l}").into()),
+        };
         let (q_key, tweak_scalar) = tweak_internal_key(p_xonly);
 
         // we signed exactly one message
@@ -173,8 +187,8 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
         let new_s = s_orig + t_k * e_k;
         sig[32..].copy_from_slice(new_s.to_bytes().as_slice());
 
-        std::fs::write(&signature, &sig)?;
-        eprintln!("Taproot tweak applied to {}", signature);
+    std::fs::write(&signature, &sig)?;
+    eprintln!("Taproot tweak applied to {}", signature);
     }
 
     Ok(())

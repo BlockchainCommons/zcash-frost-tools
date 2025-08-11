@@ -329,14 +329,10 @@ impl<C: Ciphersuite + 'static> Comms<C> for HTTPComms<C> {
         }
         eprintln!();
 
-        if !self.args.participants.is_empty() {
-            let _r = self
-                .client
-                .close_session(&api::CloseSessionArgs {
-                    session_id: self.session_id.unwrap(),
-                })
-                .await?;
-        }
+    // Do not close the session automatically here. The coordinator used to
+    // close immediately after completing Round 2, which could race with
+    // other participants still receiving messages and lead to
+    // SessionNotFound errors. Let sessions expire or be closed explicitly.
 
         let _r = self.client.logout().await?;
 

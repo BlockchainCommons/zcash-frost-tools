@@ -123,15 +123,28 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
 
     // ---------------------------------------------------------------------
     // Taproot tweak: replace `verifying_key` with Q and store P (automatic for secp256k1-tr)
-    let mut internal_key_bytes = None;                                 // NEW
-    if C::ID == Secp256K1Sha256TR::ID {               // NEW
+    let mut internal_key_bytes = None; // NEW
+    if C::ID == Secp256K1Sha256TR::ID {
+        // The verifying key may serialize in compressed (33B), uncompressed (65B),
+        // or x-only (32B) formats depending on the backend. Convert to x-only.
         let p_bytes = public_key_package.verifying_key().serialize()?; // P
-        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes).unwrap();
+        let p_xonly = match p_bytes.len() {
+            32 => XOnlyPublicKey::from_slice(&p_bytes)
+                .map_err(|e| eyre!("invalid x-only internal key: {e}"))?,
+            33 => XOnlyPublicKey::from_slice(&p_bytes[1..])
+                .map_err(|e| eyre!("invalid compressed internal key (x-only): {e}"))?,
+            65 => XOnlyPublicKey::from_slice(&p_bytes[1..33])
+                .map_err(|e| eyre!("invalid uncompressed internal key (x-only): {e}"))?,
+            l => return Err(eyre!("unexpected verifying key length: {l}").into()),
+        };
         let (q_key, _t) = tweak_internal_key(p_xonly);
 
-        use frost_core::keys::PublicKeyPackage;                        // ctor
-        use frost_core::VerifyingKey;
-        let q_vk = VerifyingKey::<C>::deserialize(&q_key.serialize())?;
+    use frost_core::keys::PublicKeyPackage;                        // ctor
+    use frost_core::VerifyingKey;
+    // Build a compressed SEC1 encoding for Q: 0x02 || x-only
+    let mut q_sec1 = vec![0x02u8];
+    q_sec1.extend_from_slice(&q_key.serialize());
+    let q_vk = VerifyingKey::<C>::deserialize(&q_sec1)?;
         public_key_package = PublicKeyPackage::new(                   // Q
             public_key_package.verifying_shares().clone(),
             q_vk,

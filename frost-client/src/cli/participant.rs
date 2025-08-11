@@ -66,8 +66,12 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
     } else {
         group.server_url.clone().ok_or_eyre("server-url required")?
     };
-    let server_url_parsed =
-        Url::parse(&format!("https://{server_url}")).wrap_err("error parsing server-url")?;
+    // Accept full URLs; default to https if no scheme provided
+    let server_url_parsed = if server_url.contains("://") {
+        Url::parse(&server_url).wrap_err("error parsing server-url")?
+    } else {
+        Url::parse(&format!("https://{server_url}")).wrap_err("error parsing server-url")?
+    };
 
     let group_participants = group.participant.clone();
     let pargs = args::ProcessedArgs {
@@ -78,9 +82,10 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
             .host_str()
             .ok_or_eyre("host missing in URL")?
             .to_owned(),
-        port: server_url_parsed
+    port: server_url_parsed
             .port_or_known_default()
             .expect("always works for https"),
+    use_https: server_url_parsed.scheme() != "http",
         session_id: session.unwrap_or_default(),
         comm_privkey: Some(
             config
