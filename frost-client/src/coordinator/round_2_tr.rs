@@ -28,12 +28,15 @@ pub async fn send_signing_package_and_get_signature_shares_tr(
         .send_signing_package_and_get_signature_shares(input, logger, signing_package, None)
         .await?;
 
-    // Aggregate with tweak (key-path, so merkle_root = None).
+    eprintln!("Taproot Option A: verifying shares under P, aggregating with tweak to Q (key‑path)");
+
+    // With DKG fix, participants.pub_key_package now contains P, so we can use it directly.
+    // Both coordinator and participants use P for FROST challenge computation.
     let sig = aggregate_with_tweak(
         signing_package,
         &signatures_list,
-        &participants.pub_key_package,
-        None,
+        &participants.pub_key_package, // Now contains P
+        None, // key-path (no merkle root)
     )?;
 
     print_signature(args, logger, sig.clone())?;

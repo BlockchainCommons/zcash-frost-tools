@@ -117,13 +117,14 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
     };
 
     // Generate key shares
-    let (key_package, mut public_key_package, pubkey_map) =
+    let (key_package, public_key_package, pubkey_map) =
         cli::cli_for_processed_args::<C>(dkg_config, &mut input, &mut output).await?;
     let key_package = Zeroizing::new(key_package);
 
     // ---------------------------------------------------------------------
-    // Taproot tweak: replace `verifying_key` with Q and store P (automatic for secp256k1-tr)
-    let mut internal_key_bytes = None; // NEW
+    // Taproot tweak: For FROST Option A, keep P in PublicKeyPackage (for FROST signing)
+    // and store Q separately. This ensures consistent challenge computation with P.
+    let mut internal_key_bytes = None;
     if C::ID == Secp256K1Sha256TR::ID {
         // The verifying key may serialize in compressed (33B), uncompressed (65B),
         // or x-only (32B) formats depending on the backend. Convert to x-only.
@@ -139,17 +140,18 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
         };
         let (q_key, _t) = tweak_internal_key(p_xonly);
 
-    use frost_core::keys::PublicKeyPackage;                        // ctor
-    use frost_core::VerifyingKey;
-    // Build a compressed SEC1 encoding for Q: 0x02 || x-only
-    let mut q_sec1 = vec![0x02u8];
-    q_sec1.extend_from_slice(&q_key.serialize());
-    let q_vk = VerifyingKey::<C>::deserialize(&q_sec1)?;
-        public_key_package = PublicKeyPackage::new(                   // Q
-            public_key_package.verifying_shares().clone(),
-            q_vk,
-        );
-        internal_key_bytes = Some(p_xonly.serialize().to_vec());       // P
+        // For Option A: Keep P in PublicKeyPackage, store Q in group ID for UI.
+        // Both coordinator and participants will use P for FROST challenge computation.
+        // The group ID (used for UI) will show Q for user recognition.
+        internal_key_bytes = Some(p_xonly.serialize().to_vec());
+
+        eprintln!("Taproot DKG: storing P in PublicKeyPackage for FROST signing");
+        eprintln!("  Internal key (P): {}", hex::encode(p_xonly.serialize()));
+        eprintln!("  Tweaked key (Q):  {}", hex::encode(q_key.serialize()));
+        eprintln!("  Group ID will use Q for identification");
+
+        // public_key_package remains with P (no modification needed)
+        // Q will be used as the group identifier instead
     }
 
     // Reverse pubkey_map
@@ -182,10 +184,24 @@ pub(crate) async fn dkg_for_ciphersuite<C: Ciphersuite + MaybeIntoEvenY + 'stati
     // `comm_participant_pubkey_getter` callback.
     // TODO: is this an issue?
     let mut config = Config::read(config_path)?;
-    config.group.insert(
-        hex::encode(public_key_package.verifying_key().serialize()?),
-        group,
-    );
+
+    // Group ID: use Q for Taproot (for user recognition), P for other ciphersuites
+    let group_id = if C::ID == Secp256K1Sha256TR::ID {
+        // For Taproot, use Q (tweaked key) as group ID for user recognition
+        let p_bytes = public_key_package.verifying_key().serialize()?;
+        let p_xonly = XOnlyPublicKey::from_slice(&p_bytes[1..])?; // Skip 0x02 prefix
+        let (q_key, _t) = tweak_internal_key(p_xonly);
+
+        // Build compressed SEC1 encoding for Q as group ID
+        let mut q_sec1 = vec![0x02u8];
+        q_sec1.extend_from_slice(&q_key.serialize());
+        hex::encode(q_sec1)
+    } else {
+        // For non-Taproot, use the public key as-is
+        hex::encode(public_key_package.verifying_key().serialize()?)
+    };
+
+    config.group.insert(group_id, group);
     config.write()?;
 
     eprintln!(

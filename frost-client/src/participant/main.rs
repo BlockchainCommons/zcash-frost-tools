@@ -1,6 +1,7 @@
 use clap::Parser;
 use frost_client::participant::args::Args;
 use frost_client::participant::cli::cli;
+use frost_client::participant::cli_tr::taproot_participant_cli;
 
 use std::io;
 
@@ -15,7 +16,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else if args.ciphersuite == "redpallas" {
         cli::<reddsa::frost::redpallas::PallasBlake2b512>(&args, &mut reader, &mut logger).await
     } else if args.ciphersuite == "secp256k1-tr" {
-        cli::<frost_secp256k1_tr::Secp256K1Sha256TR>(&args, &mut reader, &mut logger).await
+        taproot_participant_cli(&args, &mut reader, &mut logger).await
     } else {
         panic!("invalid ciphersuite");
     };
