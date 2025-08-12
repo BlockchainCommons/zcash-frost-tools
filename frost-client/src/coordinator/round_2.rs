@@ -112,69 +112,17 @@ async fn request_inputs_signature_shares<C: RandomizedCiphersuite + 'static>(
         .send_signing_package_and_get_signature_shares(input, logger, signing_package, randomizer)
         .await?;
 
-    // If we are rerandomizing (secp256k1-tr), ensure aggregation verifies against P,
-    // not Q. If the package already holds Q, rebuild a temporary package with P.
+    // For secp256k1-tr with rerandomization, verify against the tweaked package (Q).
     let agg_result = if let Some(randomizer) = randomizer {
-        use frost_core::keys::PublicKeyPackage as PKP;
-        use frost_core::VerifyingKey as VK;
-        use bitcoin::secp256k1::XOnlyPublicKey;
-
-        // Determine whether the package contains Q (tweaked) or P (untweaked)
-        let vk_bytes = participants
-            .pub_key_package
-            .verifying_key()
-            .serialize()
-            .map_err(|e| format!("Failed to serialize verifying key: {}", e))?;
-        let pkg_xonly = match vk_bytes.len() {
-            32 => XOnlyPublicKey::from_slice(&vk_bytes)
-                .map_err(|e| format!("invalid x-only key in package: {}", e))?,
-            33 => XOnlyPublicKey::from_slice(&vk_bytes[1..])
-                .map_err(|e| format!("invalid compressed key in package: {}", e))?,
-            65 => XOnlyPublicKey::from_slice(&vk_bytes[1..33])
-                .map_err(|e| format!("invalid uncompressed key in package: {}", e))?,
-            l => return Err(format!("unexpected verifying key length: {}", l).into()),
-        };
-
-        // Compute Q from P to compare
-    use bitcoin::key::TapTweak;
-        use bitcoin::secp256k1::Secp256k1;
-        let secp = Secp256k1::verification_only();
-        let internal_key = {
-            let bytes = args
-                .internal_key
-                .clone()
-                .ok_or("Internal key required for secp256k1-tr signing (should be set by cli.rs)")?;
-            XOnlyPublicKey::from_slice(&bytes)
-                .map_err(|e| format!("Invalid internal key: {}", e))?
-        };
-        let (computed_tweaked, _parity) = internal_key.tap_tweak(&secp, None);
-        let computed_q_xonly: XOnlyPublicKey = computed_tweaked.into();
-
-        // If package already has Q, rebuild a temporary package with P for aggregation
-        let use_pkg = if pkg_xonly == computed_q_xonly {
-            // Build compressed SEC1 for P (even-Y assumed for BIP-340)
-            let mut p_sec1 = vec![0x02u8];
-            p_sec1.extend_from_slice(&internal_key.serialize());
-            let p_vk = VK::<C>::deserialize(&p_sec1)
-                .map_err(|e| format!("cannot deserialize P verifying key: {}", e))?;
-            PKP::new(
-                participants.pub_key_package.verifying_shares().clone(),
-                p_vk,
-            )
-        } else {
-            participants.pub_key_package.clone()
-        };
-
-        let randomizer_params =
-            frost_rerandomized::RandomizedParams::<C>::from_randomizer(
-                use_pkg.verifying_key(),
-                randomizer,
-            );
+        let randomizer_params = frost_rerandomized::RandomizedParams::<C>::from_randomizer(
+            participants.pub_key_package.verifying_key(),
+            randomizer,
+        );
 
         frost_rerandomized::aggregate(
             signing_package,
             &signatures_list,
-            &use_pkg,
+            &participants.pub_key_package,
             &randomizer_params,
         )
     } else {
