@@ -51,14 +51,14 @@ pub async fn taproot_participant_cli_for_processed_args(
         print_values(commitments, logger)?;
     }
 
-    // Round 2 - Use standard signing path since DKG now stores P in PublicKeyPackage
+    // Round 2 - Use standard FROST (no rerandomization) for secp256k1-tr
     let round_2_config = round_2_request_inputs(
         &mut *comms,
         input,
         logger,
         commitments,
         *key_package.identifier(),
-        true, // rerandomized=true for secp256k1-tr
+        false, // standard FROST for secp256k1-tr (not rerandomized)
     )
     .await?;
 
