@@ -35,7 +35,8 @@ pub async fn run(args: &Command) -> Result<(), Box<dyn Error>> {
     } else if group.ciphersuite == PallasBlake2b512::ID {
         run_for_ciphersuite::<PallasBlake2b512>(args).await
     } else if group.ciphersuite == Secp256K1Sha256TR::ID {
-        run_for_ciphersuite::<Secp256K1Sha256TR>(args).await
+        // Route to Taproot-specific path that uses aggregate_with_tweak
+        run_for_taproot(args).await
     } else {
         Err(eyre!("unsupported ciphersuite").into())
     }
@@ -129,6 +130,87 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
     cli::cli_for_processed_args(pargs, &mut input, &mut output).await?;
 
     // For secp256k1-tr we no longer post-adjust signatures; aggregation produces the correct s.
+
+    Ok(())
+}
+
+/// Taproot-specific coordinator path using aggregate_with_tweak.
+pub(crate) async fn run_for_taproot(args: &Command) -> Result<(), Box<dyn Error>> {
+    eprintln!("Taproot Option A active: verify shares under P, aggregate_with_tweak to Q (key‑path)");
+
+    // Build the same ProcessedArgs as the generic path but call Taproot CLI
+    let Command::Coordinator {
+        config,
+        server_url,
+        group,
+        message,
+        signature,
+        signers,
+        randomizer,
+    } = (*args).clone() else {
+        panic!("invalid Command");
+    };
+
+    let mut input = std::io::stdin().lock();
+    let mut output = std::io::stdout();
+
+    let config = Config::read(config)?;
+    let group = config.group.get(&group).ok_or_eyre("Group not found")?;
+
+    let public_key_package: PublicKeyPackage<Secp256K1Sha256TR> =
+        postcard::from_bytes(&group.public_key_package)?;
+
+    let server_url_parsed = Url::parse(&server_url.ok_or_eyre("server_url required")?)?;
+
+    let signers = signers
+        .iter()
+        .map(|s| {
+            let pubkey = PublicKey(hex::decode(s)?.to_vec());
+            let contact = group.participant_by_pubkey(&pubkey)?;
+            Ok((pubkey, contact.identifier()?))
+        })
+        .collect::<Result<HashMap<_, _>, Box<dyn Error>>>()?;
+    let num_signers = signers.len() as u16;
+
+    let messages_vec = args::read_messages(&message, &mut output, &mut input)?;
+
+    let pargs = args::ProcessedArgs {
+        cli: false,
+        http: true,
+        signers,
+        num_signers,
+        public_key_package,
+        messages: messages_vec.clone(),
+        randomizers: args::read_randomizers(&randomizer, &mut output, &mut input)?,
+        signature: signature.clone(),
+        ip: server_url_parsed
+            .host_str()
+            .ok_or_eyre("host missing in URL")?
+            .to_owned(),
+        port: server_url_parsed
+            .port_or_known_default()
+            .expect("always works for https"),
+        use_https: server_url_parsed.scheme() != "http",
+        comm_privkey: Some(
+            config
+                .communication_key
+                .clone()
+                .ok_or_eyre("user not initialized")?
+                .privkey
+                .clone(),
+        ),
+        comm_pubkey: Some(
+            config
+                .communication_key
+                .ok_or_eyre("user not initialized")?
+                .pubkey
+                .clone(),
+        ),
+        internal_key: group.internal_key.clone(),
+    };
+
+    // Use Taproot CLI path instead of generic cli_for_processed_args
+    crate::coordinator::cli_tr::taproot_cli_for_processed_args(pargs, &mut input, &mut output).await?;
 
     Ok(())
 }

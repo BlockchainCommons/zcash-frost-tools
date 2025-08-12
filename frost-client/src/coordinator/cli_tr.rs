@@ -46,3 +46,52 @@ pub async fn taproot_cli(
     if let Err(e) = r { let _ = comms.cleanup_on_error().await; return Err(e); }
     Ok(())
 }
+
+/// Taproot CLI for processed args (used by frost-client coordinator subcommand).
+pub async fn taproot_cli_for_processed_args(
+    pargs: ProcessedArgs<Secp256K1Sha256TR>,
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<(), Box<dyn std::error::Error>> {
+    eprintln!("Taproot Option A: verifying shares under P, aggregating with tweak to Q (key‑path)");
+
+    let mut comms: Box<dyn Comms<Secp256K1Sha256TR>> = if pargs.cli {
+        Box::new(CLIComms::new())
+    } else if pargs.http {
+        Box::new(HTTPComms::new(&pargs)?)
+    } else {
+        Box::new(SocketComms::new(&pargs))
+    };
+
+    let participants_config = match get_commitments(&pargs, &mut *comms, input, output).await {
+        Ok(p) => p,
+        Err(e) => { let _ = comms.cleanup_on_error().await; return Err(e); }
+    };
+
+    // Ensure internal key present. If missing, derive P from package.
+    let mut pargs_mut = pargs.clone();
+    if pargs_mut.internal_key.is_none() {
+        let vk_bytes = participants_config.pub_key_package.verifying_key().serialize()?;
+        if vk_bytes.len() == 33 && vk_bytes[0] == 0x02 {
+            pargs_mut.internal_key = Some(vk_bytes[1..].to_vec());
+        }
+    }
+
+    let signing_package = build_signing_package(&pargs_mut, output, participants_config.commitments.clone());
+
+    let r = send_signing_package_and_get_signature_shares_tr(
+        &pargs_mut,
+        &mut *comms,
+        input,
+        output,
+        participants_config,
+        &signing_package,
+    ).await;
+
+    if let Err(e) = r {
+        let _ = comms.cleanup_on_error().await;
+        return Err(e);
+    }
+
+    Ok(())
+}

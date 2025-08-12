@@ -32,7 +32,8 @@ pub async fn run(args: &Command) -> Result<(), Box<dyn Error>> {
     } else if group.ciphersuite == PallasBlake2b512::ID {
         run_for_ciphersuite::<PallasBlake2b512>(args).await
     } else if group.ciphersuite == Secp256K1Sha256TR::ID {
-        run_for_ciphersuite::<Secp256K1Sha256TR>(args).await
+        // Route to Taproot-specific path
+        run_for_taproot(args).await
     } else {
         Err(eyre!("unsupported ciphersuite").into())
     }
@@ -111,6 +112,76 @@ pub(crate) async fn run_for_ciphersuite<C: RandomizedCiphersuite + 'static>(
     };
 
     cli_for_processed_args(pargs, &mut input, &mut output).await?;
+
+    Ok(())
+}
+
+/// Taproot-specific participant path using standard FROST (no rerandomization).
+pub(crate) async fn run_for_taproot(args: &Command) -> Result<(), Box<dyn Error>> {
+    eprintln!("Taproot Option A active: using standard FROST (no rerandomization), P for challenge");
+
+    // Build the same ProcessedArgs as generic path but call Taproot CLI
+    let Command::Participant {
+        config,
+        server_url,
+        group,
+        session,
+        ..
+    } = (*args).clone() else {
+        panic!("invalid Command");
+    };
+
+    let mut input = std::io::stdin().lock();
+    let mut output = std::io::stdout();
+
+    let config = Config::read(config)?;
+    let group = config.group.get(&group).ok_or_eyre("Group not found")?;
+
+    let key_package: KeyPackage<Secp256K1Sha256TR> =
+        postcard::from_bytes(&group.key_package)?;
+
+    let server_url_parsed = Url::parse(&server_url.ok_or_eyre("server_url required")?)?;
+
+    let group_participants = group.participant.clone();
+
+    let pargs = args::ProcessedArgs {
+        cli: false,
+        http: true,
+        key_package,
+        ip: server_url_parsed
+            .host_str()
+            .ok_or_eyre("host missing in URL")?
+            .to_owned(),
+        port: server_url_parsed
+            .port_or_known_default()
+            .expect("always works for https"),
+        use_https: server_url_parsed.scheme() != "http",
+        session_id: session.unwrap_or_default(),
+        comm_privkey: Some(
+            config
+                .communication_key
+                .clone()
+                .ok_or_eyre("user not initialized")?
+                .privkey
+                .clone(),
+        ),
+        comm_pubkey: Some(
+            config
+                .communication_key
+                .ok_or_eyre("user not initialized")?
+                .pubkey
+                .clone(),
+        ),
+        comm_coordinator_pubkey_getter: Some(Rc::new(move |coordinator_pubkey| {
+            group_participants
+                .values()
+                .find(|p| p.pubkey == *coordinator_pubkey)
+                .map(|p| p.pubkey.clone())
+        })),
+    };
+
+    // Use Taproot participant CLI path
+    crate::participant::cli_tr::taproot_participant_cli_for_processed_args(pargs, &mut input, &mut output).await?;
 
     Ok(())
 }
