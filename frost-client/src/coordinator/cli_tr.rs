@@ -1,7 +1,6 @@
 use std::io::{BufRead, Write};
 
-use frost_core as frost;
-use frost_rerandomized::RandomizedCiphersuite; // trait bound parity with generic path
+// No generic RandomizedCiphersuite needed here; Taproot path is monomorphic.
 use frost_secp256k1_tr::Secp256K1Sha256TR;
 
 use super::args::{Args, ProcessedArgs};
@@ -17,6 +16,7 @@ pub async fn taproot_cli(
     logger: &mut impl Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let pargs = ProcessedArgs::<Secp256K1Sha256TR>::new(args, reader, logger)?;
+    eprintln!("Taproot Option A: verifying shares under P, aggregating with tweak to Q (key-path)");
 
     let mut comms: Box<dyn Comms<Secp256K1Sha256TR>> = if pargs.cli { Box::new(CLIComms::new()) } else if pargs.http { Box::new(HTTPComms::new(&pargs)?) } else { Box::new(SocketComms::new(&pargs)) };
 
