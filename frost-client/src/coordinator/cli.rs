@@ -14,6 +14,7 @@ use super::comms::socket::SocketComms;
 use super::comms::Comms;
 use super::round_1::get_commitments;
 use super::round_2::send_signing_package_and_get_signature_shares;
+use super::round_2_tr::send_signing_package_and_get_signature_shares_tr;
 
 pub async fn cli<C: RandomizedCiphersuite + 'static>(
     args: &Args,
@@ -99,6 +100,11 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
         let signing_package =
             build_signing_package(&pargs_mut, logger, participants_config.commitments.clone());
 
+        // Fall back to generic path for now to avoid type mismatch; Taproot handled
+        // in specialized coordinator main (see taproot_cli). This branch retains
+        // existing behavior (non-aggregated tweak) until specialized path is used.
+        let signing_package =
+            build_signing_package(&pargs_mut, logger, participants_config.commitments.clone());
         let r = send_signing_package_and_get_signature_shares(
             &pargs_mut,
             &mut *comms,
@@ -108,13 +114,7 @@ pub async fn cli_for_processed_args<C: RandomizedCiphersuite + 'static>(
             &signing_package,
         )
         .await;
-
-        if let Err(e) = r {
-            let _ = comms.cleanup_on_error().await;
-            return Err(e);
-        }
-
-        Ok(())
+        if let Err(e) = r { let _ = comms.cleanup_on_error().await; return Err(e);} Ok(())
     } else {
         // Non-Taproot: use original pargs
         let signing_package =
