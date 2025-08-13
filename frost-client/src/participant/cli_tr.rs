@@ -6,13 +6,19 @@
 use std::io::{BufRead, Write};
 
 use frost_secp256k1_tr::Secp256K1Sha256TR;
+use frost_core::{
+    keys::KeyPackage,
+    round1::SigningNonces,
+    round2::SignatureShare,
+};
 
 use super::{
     args::{Args, ProcessedArgs},
     comms::{cli::CLIComms, http::HTTPComms, socket::SocketComms, Comms},
     round1::{generate_nonces_and_commitments, print_values},
-    round2::{print_values_round_2, round_2_request_inputs, generate_signature},
+    round2::{print_values_round_2, round_2_request_inputs},
 };
+use crate::api::SendSigningPackageArgs;
 use rand::thread_rng;
 use zeroize::Zeroizing;
 
@@ -39,7 +45,7 @@ pub async fn taproot_participant_cli_for_processed_args(
         Box::new(SocketComms::new(&pargs))
     };
 
-    eprintln!("Taproot Option A: DKG stored P in PublicKeyPackage for consistent FROST signing");
+    eprintln!("Taproot participant: computing challenge with Q via sign_with_tweak (no rerandomization)");
 
     // Round 1 - same as generic path
     let key_package = &pargs.key_package;
@@ -66,8 +72,8 @@ pub async fn taproot_participant_cli_for_processed_args(
         .confirm_message(input, logger, &round_2_config)
         .await?;
 
-    // Use generic signature generation since PublicKeyPackage now contains P
-    let signature = generate_signature(round_2_config, key_package, &nonces)?;
+    // Use Taproot-specific signature generation with sign_with_tweak
+    let signature = generate_signature_with_tweak(round_2_config, key_package, &nonces)?;
 
     comms
         .send_signature_share(*key_package.identifier(), signature)
@@ -79,4 +85,24 @@ pub async fn taproot_participant_cli_for_processed_args(
     writeln!(logger, "Done")?;
 
     Ok(())
+}
+
+/// Generate signature share using Taproot tweak for correct challenge computation.
+pub fn generate_signature_with_tweak(
+    config: SendSigningPackageArgs<Secp256K1Sha256TR>,
+    key_package: &KeyPackage<Secp256K1Sha256TR>,
+    signing_nonces: &SigningNonces<Secp256K1Sha256TR>,
+) -> Result<SignatureShare<Secp256K1Sha256TR>, frost_core::Error<Secp256K1Sha256TR>> {
+    let signing_package = config.signing_package.first().unwrap();
+
+    // Use Taproot-specific signing with tweak to compute challenge with Q
+    // This matches what aggregate_with_tweak expects from participants
+    let merkle_root: Option<&[u8]> = None; // key-path signing (no script)
+
+    frost_secp256k1_tr::round2::sign_with_tweak(
+        signing_package,
+        signing_nonces,
+        key_package,
+        merkle_root,
+    )
 }
